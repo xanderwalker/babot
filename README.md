@@ -61,6 +61,13 @@ node web-player/scripts/encode-blender-ribbon.mjs
 
 Render settings and source hashes are recorded in `media/singapore-2026-corkscrew-full/render-manifest.json`; encoding checks are in `encoded-verification.json` beside it. The first 0.12 seconds and final 0.092 seconds hold the nearest recorded sample, and empty initial ribbon history stays hidden.
 
+## Hosted deployment
+
+The custom-domain player is live at https://visualizerf1.xanderwalker.com/babot.
+It is part of the existing public Lapform Site (`appgprj_6a5793fec7848191a0e76239e6100a8b`), whose source checkout is `../.sites/lapform-deploy` from this directory. Its `apps/babot` folder holds the player source and completed ribbon assets; its build generates the `/babot/` assets and standalone Worker document. Update that source snapshot when publishing player changes to the custom domain.
+
+This directory's `.openai/hosting.json` still identifies the separate private player Site. It does not publish the custom-domain route. USB permission is per origin, so the custom domain requires its own first pairing.
+
 ## Sources and assets
 
 - [Official qualifying results](https://www.formula1.com/en/results/2026/races/1296/singapore/qualifying)
