@@ -2,6 +2,9 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 import ts from "typescript";
+import { PlaybackSession } from "../src/playback-session.mjs";
+import { buildSingaporeBabotMotionSeries, createSingaporePlaybackMotionSampler } from "../src/motion.mjs";
+import { commandedPoseDegrees, carPoseToFirmwarePose } from "../src/protocol.mjs";
 
 const source = await readFile(new URL("../src/babot-serial.ts", import.meta.url), "utf8");
 const helper = new URL("../src/protocol.mjs", import.meta.url).href;
@@ -17,7 +20,7 @@ async function until(predicate, timeout = 1500) {
   }
 }
 
-function setup({ armDelay = 0, wrongArmAck = false, losePose = false, offDelay = 15, missingOff = false, openDelay = 0, identity = "BABOT_MOTION 1", poseNack = false, hostname = "localhost", protocol = "http:", isSecureContext = true, isTopLevel = true, granted = false, getPortsDelay = 0, portInfo = { usbVendorId: 0x2341, usbProductId: 0x8036 }, otherPortInfo = [] } = {}) {
+function setup({ armDelay = 0, wrongArmAck = false, losePose = false, offDelay = 15, missingOff = false, openDelay = 0, identity = "BABOT_MOTION 1", poseNack = false, hostname = "localhost", protocol = "http:", isSecureContext = true, isTopLevel = true, granted = false, getPortsDelay = 0, portInfo = { usbVendorId: 0x2341, usbProductId: 0x8036 }, otherPortInfo = [], onStatus = () => {} } = {}) {
   const sent = [];
   const statuses = [];
   const calls = { chooser: 0, getPorts: 0, open: 0, otherOpen: 0, close: 0, maxPending: 0 };
@@ -81,7 +84,7 @@ function setup({ armDelay = 0, wrongArmAck = false, losePose = false, offDelay =
   win.self = win;
   globalThis.window = win;
   globalThis.location = { hostname, protocol };
-  const controller = new BabotSerial((...status) => statuses.push(status));
+  const controller = new BabotSerial((...status) => { statuses.push(status); onStatus(...status); });
   return {
     controller, sent, statuses, calls,
     event: emit,
@@ -410,4 +413,77 @@ test("a deliberate restart verifies firmware again after confirmed OFF", async (
   assert.equal(sent.filter((wire) => wire.startsWith("PING")).length, 3);
   assert.equal(sent.filter((wire) => wire.startsWith("ARM")).length, 2);
   await controller.disconnect();
+});
+
+test('Play can pair while the automatic permission lookup is still pending', async () => {
+  const { controller, calls } = setup({ getPortsDelay: 30 });
+  const restoring = controller.reconnect();
+  const connecting = controller.connect();
+  assert.equal(await restoring, false);
+  assert.equal(await connecting, true);
+  assert.equal(calls.chooser, 1);
+  assert.equal(calls.open, 1);
+  await controller.disconnect();
+});
+
+test('Disconnect cancels a queued Play pairing without opening the picker', async () => {
+  const { controller, calls } = setup({ getPortsDelay: 30 });
+  const restoring = controller.reconnect();
+  const connecting = controller.connect();
+  await controller.disconnect();
+  assert.equal(await restoring, false);
+  assert.equal(await connecting, false);
+  assert.equal(calls.chooser, 0);
+  assert.equal(calls.open, 0);
+});
+
+test('one Play drives the complete recorded lap through the real serial controller without intermediate STOP or ARM', async () => {
+  const fixture = JSON.parse(await readFile(new URL('../data/openf1-singapore-2026-verstappen-pole.json', import.meta.url), 'utf8'));
+  const durationSeconds = fixture.meta.lapDurationSeconds;
+  const sampleAt = createSingaporePlaybackMotionSampler(buildSingaporeBabotMotionSeries(fixture), { durationSeconds });
+  // Advance 50 recorded frames per wire tick: full-lap transport coverage in
+  // about two seconds, while wall-clock freshness and real ACK timing remain.
+  const times = [...Array.from({ length: Math.floor(durationSeconds) + 1 }, (_, index) => index), durationSeconds];
+  const errors = [];
+  let session;
+  const { controller, sent, calls } = setup({ granted: true, onStatus: (_message, connected, _active, detail) => {
+    session?.updateStatus(detail.phase, connected, detail.offConfirmed);
+  } });
+  const posesSent = () => sent.filter((wire) => wire.startsWith('POSE '));
+  const wirePoseAt = time => carPoseToFirmwarePose(commandedPoseDegrees(sampleAt(time), { roll: 10, pitch: 10 }));
+  session = new PlaybackSession(controller, () => {
+    const time = times[Math.min(posesSent().length, times.length - 1)];
+    const sample = sampleAt(time);
+    return sample.valid ? { ...wirePoseAt(time), sampledAt: performance.now() } : null;
+  }, error => errors.push(error.message));
+  const pump = setInterval(() => session.tick(), 5);
+  try {
+    await controller.reconnect();
+    assert.deepEqual(sent, ['PING 1']);
+    assert.equal(calls.chooser, 0);
+    session.play();
+    await until(() => posesSent().length >= times.length, 5000);
+    assert.equal(sent.filter(wire => wire.startsWith('ARM ')).length, 1);
+    assert.equal(sent.some(wire => wire.startsWith('STOP ')), false);
+    for (const time of [0, 27, 51, 63, durationSeconds]) {
+      const [, , roll, pitch] = posesSent()[times.indexOf(time)].split(' ');
+      const expected = wirePoseAt(time);
+      assert.ok(Math.abs(Number(roll) - expected.roll) <= 0.00051, `roll at ${time}s`);
+      assert.ok(Math.abs(Number(pitch) - expected.pitch) <= 0.00051, `pitch at ${time}s`);
+    }
+    assert.equal(session.wantsMotion, true);
+    const stopped = await session.pause('Lap complete');
+    assert.equal(stopped.offConfirmed, true);
+    await until(() => session.runPromise === null);
+    session.tick();
+    assert.equal(sent.filter(wire => wire.startsWith('ARM ')).length, 1);
+    assert.equal(sent.filter(wire => wire.startsWith('STOP ')).length, 1);
+    assert.equal(calls.maxPending, 1);
+    assert.deepEqual(errors, []);
+    assert.equal(session.wantsMotion, false);
+  } finally {
+    clearInterval(pump);
+    await session.dispose();
+    await controller.disconnect();
+  }
 });

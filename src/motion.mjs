@@ -841,3 +841,113 @@ export function singaporeMotionAt(series, elapsedSeconds) {
   }
   return Object.freeze(interpolated);
 }
+
+// The recorded 2026 pole lap has three valid-pose brackets of 1120, 1160,
+// and 1180 ms, plus 300 ms / 173 ms of uncovered leading / trailing time.
+// These are playback limits, not a change to the strict source-data model.
+export const SINGAPORE_RECORDED_PLAYBACK_CONTRACT = Object.freeze({
+  maximumInterpolationGapMs: 1200,
+  maximumEndpointHoldMs: 350,
+  maximumNormalizedAxis: 1,
+});
+
+const DISCRETE_SAMPLE_KEYS = Object.freeze(["brakeOn", "gear", "drs"]);
+
+function finitePlaybackSample(sample) {
+  return sample?.valid === true && Number.isFinite(sample.timeMs) &&
+    [...CONTINUOUS_SAMPLE_KEYS, ...DISCRETE_SAMPLE_KEYS].every((key) => Number.isFinite(sample[key])) &&
+    Math.abs(sample.pitch) <= 1 && Math.abs(sample.roll) <= 1;
+}
+
+/**
+ * Prepare once for an immutable, recorded lap; call the returned sampler with
+ * lap seconds. `valid` means a bounded playback pose is available, while
+ * `sourceValid` retains the strict source sampler's validity. Gap interpolation
+ * and endpoint holds are disclosed in `playbackMode`. This has no live clock,
+ * USB, arming, or watchdog authority: those checks still belong to the caller.
+ */
+export function createSingaporePlaybackMotionSampler(series, options = {}) {
+  const durationSeconds = options.durationSeconds ?? series?.diagnostics?.lapTimelineDurationMs / 1000;
+  if (!Number.isFinite(durationSeconds) || durationSeconds <= 0) {
+    throw new TypeError("Recorded playback requires a finite positive lap duration");
+  }
+  const durationMs = durationSeconds * 1000;
+  const input = Array.isArray(series) ? series : series?.samples;
+  const samples = (Array.isArray(input) ? input : [])
+    .filter((sample) => finitePlaybackSample(sample) && sample.timeMs >= 0 && sample.timeMs <= durationMs)
+    .map((sample) => Object.freeze({ ...sample }))
+    .sort((left, right) => left.timeMs - right.timeMs)
+    .filter((sample, index, sorted) => !index || sample.timeMs !== sorted[index - 1].timeMs);
+  const { maximumInterpolationGapMs, maximumEndpointHoldMs } = SINGAPORE_RECORDED_PLAYBACK_CONTRACT;
+
+  return function playbackMotionAt(elapsedSeconds) {
+    const finiteTime = Number.isFinite(elapsedSeconds);
+    const requestedMs = finiteTime ? Math.round(elapsedSeconds * 1e9) / 1e6 : 0;
+    const unavailable = (playbackReason) => Object.freeze({
+      ...singaporeMotionAt([], requestedMs / 1000),
+      sourceValid: false,
+      playbackMode: "unavailable",
+      playbackReason,
+    });
+    // Never clamp a stale or out-of-window clock into an indefinitely held pose.
+    if (!finiteTime || elapsedSeconds < 0 || elapsedSeconds > durationSeconds) {
+      return unavailable("outside-recorded-lap");
+    }
+    if (!samples.length) return unavailable("no-finite-valid-samples");
+
+    const first = samples[0];
+    const last = samples.at(-1);
+    if (requestedMs < first.timeMs || requestedMs > last.timeMs) {
+      const leading = requestedMs < first.timeMs;
+      const endpoint = leading ? first : last;
+      // The entire uncovered endpoint must be short, not just this request's
+      // distance to it. A long missing opening/ending cannot become valid midway.
+      const uncoveredMs = leading ? first.timeMs : durationMs - last.timeMs;
+      if (uncoveredMs > maximumEndpointHoldMs) return unavailable("endpoint-hold-limit");
+      return Object.freeze({
+        ...endpoint,
+        timeMs: requestedMs,
+        valid: true,
+        sourceValid: false,
+        playbackMode: leading ? "held-start" : "held-end",
+        playbackReason: "short-recorded-endpoint",
+      });
+    }
+
+    let lowIndex = 0;
+    let highIndex = samples.length - 1;
+    while (lowIndex + 1 < highIndex) {
+      const middle = (lowIndex + highIndex) >> 1;
+      if (samples[middle].timeMs <= requestedMs) lowIndex = middle;
+      else highIndex = middle;
+    }
+    const low = samples[lowIndex];
+    const high = samples[highIndex];
+    const exact = requestedMs === low.timeMs ? low : requestedMs === high.timeMs ? high : null;
+    if (exact) return Object.freeze({
+      ...exact,
+      sourceValid: true,
+      playbackMode: "source",
+      playbackReason: "valid-recorded-pose",
+    });
+    const spanMs = high.timeMs - low.timeMs;
+    if (spanMs > maximumInterpolationGapMs) return unavailable("interpolation-gap-limit");
+    const amount = (requestedMs - low.timeMs) / spanMs;
+    const nearest = amount < 0.5 ? low : high;
+    const sourceValid = finitePlaybackSample(singaporeMotionAt(series, elapsedSeconds));
+    const interpolated = {
+      timeMs: requestedMs,
+      valid: true,
+      sourceValid,
+      playbackMode: sourceValid ? "source" : "interpolated-gap",
+      playbackReason: sourceValid ? "valid-recorded-pose" : "short-recorded-gap",
+      brakeOn: nearest.brakeOn,
+      gear: nearest.gear,
+      drs: nearest.drs,
+    };
+    // A convex blend cannot overshoot either valid normalized endpoint. Do not
+    // extrapolate derivatives or bridge via the strict model's neutral placeholders.
+    for (const key of CONTINUOUS_SAMPLE_KEYS) interpolated[key] = lerp(low[key], high[key], amount);
+    return Object.freeze(interpolated);
+  };
+}

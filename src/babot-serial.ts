@@ -181,6 +181,11 @@ export class BabotSerial {
   }
 
   connect(): Promise<boolean> {
+    if (this.opening) {
+      const generation = this.connectionGeneration;
+      return this.opening.then((connected) => connected || generation !== this.connectionGeneration
+        ? connected : this.beginConnection(true));
+    }
     return this.beginConnection(true);
   }
 
