@@ -1,0 +1,57 @@
+import { useEffect, useRef, useState } from 'react';
+
+type RibbonManifest = { src: string; poster?: string; fps: number; startTimeSeconds: number; duration: number; title: string };
+const MASTER_STALE_MS = 180;
+
+/** The onboard remains authoritative. This media element only follows its lap clock. */
+export function BlenderRibbon({timeSeconds, playing, playbackRate, duration}: {timeSeconds:number;playing:boolean;playbackRate:number;duration:number}) {
+  const element=useRef<HTMLVideoElement>(null);
+  const masterClock=useRef({time:Number.NaN,advancedAt:-Infinity});
+  const [manifest,setManifest]=useState<RibbonManifest|null>(null);
+  const [ready,setReady]=useState(false);
+  const [error,setError]=useState('');
+  const [progress,setProgress]=useState<{completed:number;total:number;message?:string}|null>(null);
+  useEffect(()=>{
+    let cancelled=false, timer:ReturnType<typeof setTimeout>;
+    const controller=new AbortController();
+    const check=async()=>{
+      try {
+        const response=await fetch('/media/ribbon.json',{signal:controller.signal,cache:'no-store'});
+        if(!response.ok || !response.headers.get('content-type')?.includes('json'))throw new Error('pending');
+        const value:RibbonManifest=await response.json();
+        if(cancelled)return;
+        setManifest(value);setError('');
+      } catch {
+        if(cancelled)return;
+        setError('Rendering this lap with the existing Blender workflow.');
+        try { const r=await fetch('/media/ribbon-progress.json',{signal:controller.signal,cache:'no-store'});if(r.ok&&r.headers.get('content-type')?.includes('json')){const p=await r.json();if(!cancelled)setProgress(p);}} catch {}
+        if(!cancelled)timer=setTimeout(check,5000);
+      }
+    };
+    void check();
+    return()=>{cancelled=true;controller.abort();clearTimeout(timer);};
+  },[]);
+  useEffect(()=>{
+    if(Number.isFinite(timeSeconds)&&timeSeconds!==masterClock.current.time){
+      masterClock.current={time:timeSeconds,advancedAt:performance.now()};
+    }
+    const el=element.current;if(!el||!manifest||!ready)return;
+    const target=Math.max(0,Math.min(manifest.duration-.02,timeSeconds-manifest.startTimeSeconds));
+    // Small drift corrections avoid independent clocks diverging during playback.
+    if(Math.abs(el.currentTime-target)>(playing?.06:.008))el.currentTime=target;
+    el.playbackRate=playbackRate;
+    const clockFresh=performance.now()-masterClock.current.advancedAt<MASTER_STALE_MS;
+    if(playing&&clockFresh&&timeSeconds<duration){if(el.paused)void el.play().then(()=>setError('')).catch((cause:unknown)=>{if(!(cause instanceof DOMException&&cause.name==='AbortError'))setError('Press Play again to start the ribbon video.');});}
+    else if(!el.paused)el.pause();
+  },[timeSeconds,playing,playbackRate,manifest,ready,duration]);
+  useEffect(()=>{
+    const el=element.current;if(!el||!playing||!ready)return;
+    // A frozen master does not change React props. Independently pause this
+    // follower so it cannot run ahead while the onboard is buffering.
+    const watchdog=setInterval(()=>{
+      if(performance.now()-masterClock.current.advancedAt>=MASTER_STALE_MS&&!el.paused)el.pause();
+    },40);
+    return()=>clearInterval(watchdog);
+  },[playing,ready,manifest]);
+  return <div className="blender-ribbon">{!manifest?<img className="ribbon-preview-still" src="/media/singapore-2026-ribbon-poster.jpg" alt="Preview still from this lap's Blender ribbon render"/>:null}{manifest?<video ref={element} src={manifest.src} poster={manifest.poster} muted playsInline preload="auto" aria-label="Blender-rendered Twin Ribbon of the 2026 Singapore pole lap" onLoadedMetadata={()=>{setReady(true);setError('');}} onError={()=>{setReady(false);setError('Ribbon video unavailable. Reload to try again.');}}/>:null}{error?<div className="ribbon-render-status"><span>{manifest?'RIBBON PLAYBACK ERROR':'PREVIEW STILL / RENDER IN PROGRESS'}</span><p>{error}</p>{!manifest&&progress&&progress.total>0?<small>{Math.round(progress.completed/progress.total*100)}% · {progress.completed.toLocaleString()} / {progress.total.toLocaleString()} frames</small>:null}</div>:null}</div>;
+}

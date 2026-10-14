@@ -1,0 +1,15 @@
+node_modules/
+dist/
+*.tsbuildinfo
+.openai/*
+!.openai/hosting.json
+media/
+public/media/
+qa/
+
+data/*.mp4
+data/*media.json
+data/evidence/
+__pycache__/
+*.pyc
+scripts/blender/__pycache__/
