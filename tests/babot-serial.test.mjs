@@ -17,10 +17,10 @@ async function until(predicate, timeout = 1500) {
   }
 }
 
-function setup({ armDelay = 0, wrongArmAck = false, losePose = false, offDelay = 15, missingOff = false, openDelay = 0, identity = "BABOT_MOTION 1", poseNack = false, hostname = "localhost", protocol = "http:", isSecureContext = true, isTopLevel = true } = {}) {
+function setup({ armDelay = 0, wrongArmAck = false, losePose = false, offDelay = 15, missingOff = false, openDelay = 0, identity = "BABOT_MOTION 1", poseNack = false, hostname = "localhost", protocol = "http:", isSecureContext = true, isTopLevel = true, granted = false, getPortsDelay = 0, portInfo = { usbVendorId: 0x2341, usbProductId: 0x8036 }, otherPortInfo = [] } = {}) {
   const sent = [];
   const statuses = [];
-  const calls = { chooser: 0, open: 0, close: 0, maxPending: 0 };
+  const calls = { chooser: 0, getPorts: 0, open: 0, otherOpen: 0, close: 0, maxPending: 0 };
   let incoming;
   let armed = false;
   let returning = false;
@@ -33,8 +33,8 @@ function setup({ armDelay = 0, wrongArmAck = false, losePose = false, offDelay =
   const emit = (line) => {
     try { incoming.enqueue(new TextEncoder().encode(line + "\n")); } catch {}
   };
-  const readable = new ReadableStream({ start(controller) { incoming = controller; } });
-  const writable = new WritableStream({ write(bytes) {
+  const createReadable = () => new ReadableStream({ start(controller) { incoming = controller; } });
+  const createWritable = () => new WritableStream({ write(bytes) {
     const wire = new TextDecoder().decode(bytes).trim();
     sent.push(wire);
     const [verb, sequence, roll, pitch] = wire.split(" ");
@@ -63,12 +63,18 @@ function setup({ armDelay = 0, wrongArmAck = false, losePose = false, offDelay =
     later(() => { pending--; emit(answer); }, verb === "ARM" ? armDelay : 0);
   } });
   const port = {
-    readable, writable,
-    async open() { calls.open++; await sleep(openDelay); },
-    async close() { calls.close++; for (const timer of timers) clearTimeout(timer); timers.clear(); },
+    readable: null, writable: null,
+    getInfo() { return portInfo; },
+    async open() { calls.open++; await sleep(openDelay); this.readable = createReadable(); this.writable = createWritable(); },
+    async close() { calls.close++; for (const timer of timers) clearTimeout(timer); timers.clear(); this.readable = null; this.writable = null; },
   };
+  const otherPorts = otherPortInfo.map((info) => ({
+    getInfo() { return info; },
+    async open() { calls.otherOpen++; throw new Error("An unrelated or ambiguous port was selected"); },
+  }));
   Object.defineProperty(globalThis, "navigator", { configurable: true, value: { serial: {
-    async requestPort() { calls.chooser++; return port; },
+    async getPorts() { calls.getPorts++; await sleep(getPortsDelay); return [...(granted ? [port] : []), ...otherPorts]; },
+    async requestPort() { calls.chooser++; granted = true; return port; },
   } } });
   const win = { isSecureContext };
   win.top = isTopLevel ? win : {};
@@ -94,6 +100,82 @@ test("connection only identifies firmware; stopping idle does not send invalid S
   assert.equal(calls.close, 1);
 });
 
+for (const usbVendorId of [0x2341, 0x2a03]) test(`remembered Leonardo ${usbVendorId.toString(16)} reconnects with PING only and no picker`, async () => {
+  const { controller, sent, calls, statuses } = setup({
+    granted: true,
+    portInfo: { usbVendorId, usbProductId: 0x8036 },
+    otherPortInfo: [{ usbVendorId: 0x2341, usbProductId: 0x0043 }, {}],
+  });
+  assert.equal(await controller.reconnect(), true);
+  assert.deepEqual(sent, ["PING 1"]);
+  assert.equal(calls.chooser, 0);
+  assert.equal(calls.open, 1);
+  assert.equal(calls.otherOpen, 0);
+  assert.equal(statuses.at(-1)[1], true);
+  assert.equal(statuses.at(-1)[2], false, "permission reuse does not start motion");
+  assert.equal(await controller.connect(), true);
+  assert.deepEqual(sent, ["PING 1"], "repeated Connect while verified does not restart the session");
+  await controller.disconnect();
+});
+
+test("no remembered controller never prompts during reconnect; manual connection grants permission once", async () => {
+  const { controller, sent, calls } = setup({ otherPortInfo: [{ usbVendorId: 0x2341, usbProductId: 0x0036 }] });
+  assert.equal(await controller.reconnect(), false);
+  assert.equal(calls.chooser, 0);
+  assert.equal(calls.open, 0);
+  assert.equal(calls.otherOpen, 0);
+  assert.deepEqual(sent, []);
+  assert.equal(await controller.connect(), true);
+  assert.equal(calls.chooser, 1);
+  assert.deepEqual(sent, ["PING 1"]);
+  await controller.disconnect();
+  assert.equal(await controller.connect(), true);
+  assert.equal(calls.chooser, 1, "a later manual Connect reuses the existing browser grant");
+  assert.equal(calls.open, 2);
+  assert.deepEqual(sent, ["PING 1", "PING 1"]);
+  await controller.disconnect();
+});
+
+test("multiple remembered Leonardos require manual choice and never select an arbitrary port", async () => {
+  const { controller, sent, calls } = setup({ granted: true, otherPortInfo: [{ usbVendorId: 0x2a03, usbProductId: 0x8036 }] });
+  assert.equal(await controller.reconnect(), false);
+  assert.equal(calls.chooser, 0);
+  assert.equal(calls.open, 0);
+  assert.equal(calls.otherOpen, 0);
+  assert.deepEqual(sent, []);
+  assert.equal(await controller.connect(), true);
+  assert.equal(calls.chooser, 1);
+  assert.equal(calls.otherOpen, 0);
+  assert.deepEqual(sent, ["PING 1"]);
+  await controller.disconnect();
+});
+
+test("remembered permission still rejects incompatible firmware without prompting or arming", async () => {
+  const { controller, sent, calls, statuses } = setup({ granted: true, identity: "BABOT_MOTION 2" });
+  await assert.rejects(controller.reconnect(), /not identified/);
+  assert.equal(calls.chooser, 0);
+  assert.equal(calls.close, 1);
+  assert.deepEqual(sent, ["PING 1"]);
+  assert.equal(statuses.some((state) => state[1] || state[2]), false);
+  await assert.rejects(controller.start(() => fresh()), /Connect and verify/);
+});
+
+for (const method of ["reconnect", "connect"]) test(`disconnect cancels ${method} during remembered-port lookup`, async () => {
+  // Cover both a remembered port and the manual picker fallback.
+  for (const granted of [true, false]) {
+    const { controller, sent, calls, statuses } = setup({ granted, getPortsDelay: 40 });
+    const opening = controller[method]();
+    await until(() => calls.getPorts === 1);
+    await controller.disconnect();
+    assert.equal(await opening, false);
+    assert.equal(calls.chooser, 0);
+    assert.equal(calls.open, 0);
+    assert.deepEqual(sent, []);
+    assert.equal(statuses.some((state) => state[1] || state[2]), false);
+    assert.equal(statuses.at(-1)[3].phase, "disconnected");
+  }
+});
+
 test("insecure and embedded pages cannot choose, open or arm USB", async () => {
   for (const context of [
     { hostname: "visualizerf1.xanderwalker.com", protocol: "http:", isSecureContext: false },
@@ -102,8 +184,10 @@ test("insecure and embedded pages cannot choose, open or arm USB", async () => {
   ]) {
     const { controller, calls, sent } = setup(context);
     await assert.rejects(controller.connect());
+    await assert.rejects(controller.reconnect());
     await assert.rejects(controller.start(() => fresh()));
     assert.equal(calls.chooser, 0);
+    assert.equal(calls.getPorts, 0);
     assert.equal(calls.open, 0);
     assert.deepEqual(sent, []);
   }

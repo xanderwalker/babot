@@ -10,10 +10,14 @@ import {
 type Port = {
   readable: ReadableStream<Uint8Array> | null;
   writable: WritableStream<Uint8Array> | null;
+  getInfo(): { usbVendorId?: number; usbProductId?: number };
   open(options: { baudRate: number }): Promise<void>;
   close(): Promise<void>;
 };
-type Serial = { requestPort(options: { filters: { usbVendorId: number; usbProductId: number }[] }): Promise<Port> };
+type Serial = {
+  getPorts(): Promise<Port[]>;
+  requestPort(options: { filters: { usbVendorId: number; usbProductId: number }[] }): Promise<Port>;
+};
 export type BabotPose = { roll: number; pitch: number; sampledAt: number };
 export type StopResult = { acknowledged: boolean; offConfirmed: boolean };
 export type BabotStatus = {
@@ -24,6 +28,10 @@ export type BabotStatus = {
 type StatusListener = (message: string, connected: boolean, active: boolean, detail: BabotStatus) => void;
 type Pending = { id: number; verb: string; resolve(line: string): void; reject(error: Error): void; timer: ReturnType<typeof setTimeout> };
 const delay = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+const CONTROLLER_FILTERS = [
+  { usbVendorId: 0x2341, usbProductId: 0x8036 },
+  { usbVendorId: 0x2a03, usbProductId: 0x8036 },
+];
 
 /** One acknowledged command at a time. No stale-pose backlog or automatic re-arm. */
 export class BabotSerial {
@@ -173,24 +181,47 @@ export class BabotSerial {
   }
 
   connect(): Promise<boolean> {
+    return this.beginConnection(true);
+  }
+
+  /** Reuse browser permission without opening a picker or starting motion. */
+  reconnect(): Promise<boolean> {
+    return this.beginConnection(false);
+  }
+
+  private beginConnection(allowChooser: boolean): Promise<boolean> {
     if (this.verified) return Promise.resolve(true);
     if (this.opening) return this.opening;
     const generation = this.connectionGeneration;
-    this.opening = this.open(generation).finally(() => { this.opening = null; });
+    this.opening = this.open(generation, allowChooser).finally(() => { this.opening = null; });
     return this.opening;
   }
 
-  private async open(generation: number) {
+  private async open(generation: number, allowChooser: boolean) {
     if (!isApprovedControllerOrigin({ isSecureContext: window.isSecureContext, isTopLevel: window.top === window.self })) {
       throw new Error("Open the player directly in a secure browser tab (HTTPS or localhost) to connect BaBot");
     }
     const api = (navigator as Navigator & { serial?: Serial }).serial;
     if (!api) throw new Error("USB control requires desktop Chrome with Web Serial");
-    this.status("Choose BaBot / Arduino Leonardo", "connecting");
-    const selected = await api.requestPort({ filters: [
-      { usbVendorId: 0x2341, usbProductId: 0x8036 },
-      { usbVendorId: 0x2a03, usbProductId: 0x8036 },
-    ] });
+    this.status("Checking remembered BaBot permission", "connecting");
+    const granted = await api.getPorts();
+    if (generation !== this.connectionGeneration) return false;
+    const eligible = granted.filter((port) => {
+      const info = port.getInfo();
+      return CONTROLLER_FILTERS.some((filter) => info.usbVendorId === filter.usbVendorId && info.usbProductId === filter.usbProductId);
+    });
+    let selected: Port;
+    if (eligible.length === 1) {
+      selected = eligible[0];
+      this.status("Reconnecting remembered BaBot", "connecting");
+    } else {
+      if (!allowChooser) {
+        this.status(eligible.length > 1 ? "Multiple remembered controllers · select Connect to choose BaBot" : "Select Connect to grant BaBot USB access once", "disconnected");
+        return false;
+      }
+      this.status("Choose BaBot / Arduino Leonardo", "connecting");
+      selected = await api.requestPort({ filters: CONTROLLER_FILTERS });
+    }
     if (generation !== this.connectionGeneration) return false;
     if (this.port) { await this.stop(); await this.close(); }
     if (generation !== this.connectionGeneration) return false;
