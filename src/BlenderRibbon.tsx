@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { assetUrl } from './asset-url';
 
 type RibbonManifest = { src: string; poster?: string; fps: number; startTimeSeconds: number; duration: number; title: string };
 const MASTER_STALE_MS = 180;
@@ -18,15 +19,15 @@ export function BlenderRibbon({timeSeconds, playing, playbackRate, duration}: {t
     const controller=new AbortController();
     const check=async()=>{
       try {
-        const response=await fetch('/media/ribbon.json',{signal:controller.signal,cache:'no-store'});
+        const response=await fetch(assetUrl('/media/ribbon.json'),{signal:controller.signal,cache:'no-store'});
         if(!response.ok || !response.headers.get('content-type')?.includes('json'))throw new Error('pending');
         const value:RibbonManifest=await response.json();
         if(cancelled)return;
-        setManifest(value);setError('');
+        setManifest({...value,src:assetUrl(value.src),poster:value.poster?assetUrl(value.poster):undefined});setError('');
       } catch {
         if(cancelled)return;
         setError('Rendering this lap with the existing Blender workflow.');
-        try { const r=await fetch('/media/ribbon-progress.json',{signal:controller.signal,cache:'no-store'});if(r.ok&&r.headers.get('content-type')?.includes('json')){const p=await r.json();if(!cancelled)setProgress(p);}} catch {}
+        try { const r=await fetch(assetUrl('/media/ribbon-progress.json'),{signal:controller.signal,cache:'no-store'});if(r.ok&&r.headers.get('content-type')?.includes('json')){const p=await r.json();if(!cancelled)setProgress(p);}} catch {}
         if(!cancelled)timer=setTimeout(check,5000);
       }
     };
@@ -84,7 +85,7 @@ export function BlenderRibbon({timeSeconds, playing, playbackRate, duration}: {t
     return()=>clearInterval(watchdog);
   },[playing,ready,manifest]);
   return <div className="blender-ribbon">
-    {!videoUrl?<img className="ribbon-preview-still" src={manifest?.poster||'/media/singapore-2026-ribbon-poster.jpg'} alt="Preview still from this lap's Blender ribbon render"/>:null}
+    {!videoUrl?<img className="ribbon-preview-still" src={manifest?.poster||assetUrl('/media/singapore-2026-ribbon-poster.jpg')} alt="Preview still from this lap's Blender ribbon render"/>:null}
     {manifest&&videoUrl?<video key={videoUrl} ref={element} src={videoUrl} poster={manifest.poster} muted playsInline preload="auto" aria-label="Blender-rendered Twin Ribbon of the 2026 Singapore pole lap" onLoadedMetadata={()=>{setReady(true);setLoading(false);setError('');}} onError={()=>{setReady(false);setLoading(false);setError('Ribbon video unavailable. Reload to try again.');}}/>:null}
     {loading?<div className="ribbon-render-status" role="status"><span>LOADING RIBBON VIDEO</span><p>Preparing the ribbon film for synchronized playback.</p></div>:null}
     {error?<div className="ribbon-render-status" role="status"><span>{manifest?(ready?'RIBBON PLAYBACK ERROR':'RIBBON LOAD ERROR'):'PREVIEW STILL / RENDER IN PROGRESS'}</span><p>{error}</p>{!manifest&&progress&&progress.total>0?<small>{Math.round(progress.completed/progress.total*100)}% · {progress.completed.toLocaleString()} / {progress.total.toLocaleString()} frames</small>:null}</div>:null}
