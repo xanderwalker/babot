@@ -8,9 +8,8 @@ export const BABOT_PROTOCOL = Object.freeze({
   stopReturnTimeoutMs: 1000,
 });
 
-export function isApprovedControllerOrigin({ hostname, isSecureContext, isTopLevel } = {}) {
-  return isSecureContext === true && isTopLevel === true &&
-    ["localhost", "127.0.0.1", "::1", "[::1]"].includes(String(hostname).toLowerCase());
+export function isApprovedControllerOrigin({ isSecureContext, isTopLevel } = {}) {
+  return isSecureContext === true && isTopLevel === true;
 }
 
 export function limitPoseMagnitude(pose, maximumDegrees = BABOT_PROTOCOL.maximumDegrees) {

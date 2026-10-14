@@ -17,7 +17,7 @@ async function until(predicate, timeout = 1500) {
   }
 }
 
-function setup({ armDelay = 0, wrongArmAck = false, losePose = false, offDelay = 15, missingOff = false, openDelay = 0, identity = "BABOT_MOTION 1", poseNack = false } = {}) {
+function setup({ armDelay = 0, wrongArmAck = false, losePose = false, offDelay = 15, missingOff = false, openDelay = 0, identity = "BABOT_MOTION 1", poseNack = false, hostname = "localhost", protocol = "http:", isSecureContext = true, isTopLevel = true } = {}) {
   const sent = [];
   const statuses = [];
   const calls = { chooser: 0, open: 0, close: 0, maxPending: 0 };
@@ -70,11 +70,11 @@ function setup({ armDelay = 0, wrongArmAck = false, losePose = false, offDelay =
   Object.defineProperty(globalThis, "navigator", { configurable: true, value: { serial: {
     async requestPort() { calls.chooser++; return port; },
   } } });
-  const win = { isSecureContext: true };
-  win.top = win;
+  const win = { isSecureContext };
+  win.top = isTopLevel ? win : {};
   win.self = win;
   globalThis.window = win;
-  globalThis.location = { hostname: "localhost", protocol: "http:" };
+  globalThis.location = { hostname, protocol };
   const controller = new BabotSerial((...status) => statuses.push(status));
   return {
     controller, sent, statuses, calls,
@@ -94,11 +94,19 @@ test("connection only identifies firmware; stopping idle does not send invalid S
   assert.equal(calls.close, 1);
 });
 
-test("a remote host cannot open or arm USB", async () => {
-  const { controller, calls } = setup();
-  globalThis.location.hostname = "example.com";
-  await assert.rejects(controller.connect(), /localhost/);
-  assert.equal(calls.chooser, 0);
+test("insecure and embedded pages cannot choose, open or arm USB", async () => {
+  for (const context of [
+    { hostname: "visualizerf1.xanderwalker.com", protocol: "http:", isSecureContext: false },
+    { hostname: "visualizerf1.xanderwalker.com", protocol: "https:", isTopLevel: false },
+    { hostname: "localhost", isTopLevel: false },
+  ]) {
+    const { controller, calls, sent } = setup(context);
+    await assert.rejects(controller.connect());
+    await assert.rejects(controller.start(() => fresh()));
+    assert.equal(calls.chooser, 0);
+    assert.equal(calls.open, 0);
+    assert.deepEqual(sent, []);
+  }
 });
 
 test("incompatible firmware never enables ARM", async () => {
@@ -108,15 +116,24 @@ test("incompatible firmware never enables ARM", async () => {
   assert.equal(statuses.some((state) => state[1]), false);
 });
 
-test("fresh playback is identified, armed, bounded and streamed with one command outstanding", async () => {
-  const { controller, sent, calls } = setup();
+for (const origin of [
+  { label: "localhost", hostname: "localhost", protocol: "http:" },
+  { label: "hosted HTTPS", hostname: "visualizerf1.xanderwalker.com", protocol: "https:" },
+]) test(`${origin.label} playback is identified, armed, bounded and stopped with one command outstanding`, async () => {
+  const { controller, sent, calls, statuses } = setup(origin);
   await controller.connect();
+  assert.deepEqual(sent, ["PING 1"], "connecting alone never arms or moves the platform");
   const run = controller.start(() => fresh(50, -50));
   await until(() => sent.filter((wire) => wire.startsWith("POSE")).length >= 4);
   const result = await controller.stop();
   await run;
   assert.deepEqual(result, { acknowledged: true, offConfirmed: true });
   assert.deepEqual(sent.slice(0, 3).map((wire) => wire.split(" ")[0]), ["PING", "PING", "ARM"]);
+  assert.match(sent.at(-1), /^STOP /);
+  assert.equal(statuses.at(-1)[3].offConfirmed, true);
+  assert.equal(statuses.at(-1)[2], false);
+  assert.equal(calls.chooser, 1);
+  assert.equal(calls.open, 1);
   assert.equal(calls.maxPending, 1);
   for (let i = 1; i < sent.length; i++) assert.ok(Number(sent[i].split(" ")[1]) > Number(sent[i - 1].split(" ")[1]));
   for (const wire of sent.filter((wire) => wire.startsWith("POSE"))) {
@@ -124,6 +141,7 @@ test("fresh playback is identified, armed, bounded and streamed with one command
     assert.ok(Math.hypot(Number(roll), Number(pitch)) <= 20);
   }
   await controller.disconnect();
+  assert.equal(calls.close, 1);
 });
 
 test("STOP acknowledgement alone is not reported as a completed level return", async () => {

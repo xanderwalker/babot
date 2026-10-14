@@ -181,8 +181,8 @@ export class BabotSerial {
   }
 
   private async open(generation: number) {
-    if (!isApprovedControllerOrigin({ hostname: location.hostname, isSecureContext: window.isSecureContext, isTopLevel: window.top === window.self })) {
-      throw new Error("Open this player on localhost in desktop Chrome to connect BaBot");
+    if (!isApprovedControllerOrigin({ isSecureContext: window.isSecureContext, isTopLevel: window.top === window.self })) {
+      throw new Error("Open the player directly in a secure browser tab (HTTPS or localhost) to connect BaBot");
     }
     const api = (navigator as Navigator & { serial?: Serial }).serial;
     if (!api) throw new Error("USB control requires desktop Chrome with Web Serial");

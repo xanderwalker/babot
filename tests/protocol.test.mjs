@@ -26,13 +26,24 @@ test("invalid numbers and sequences are rejected instead of becoming neutral com
   for (const id of [0, -1, 0.5, 0x100000000, NaN]) assert.throws(() => formatArmCommand(id), /sequence/);
 });
 
-test("USB is restricted to a secure top-level localhost origin", () => {
-  for (const hostname of ["localhost", "127.0.0.1", "[::1]"]) {
+test("USB permits secure top-level localhost and hosted HTTPS origins", () => {
+  for (const hostname of ["localhost", "127.0.0.1", "::1", "[::1]", "visualizerf1.xanderwalker.com", "example.com"]) {
     assert.equal(isApprovedControllerOrigin({ hostname, isSecureContext: true, isTopLevel: true }), true);
   }
+  assert.equal(isApprovedControllerOrigin({ isSecureContext: true, isTopLevel: true }), true, "hostname is not an access gate");
+});
+
+test("USB rejects insecure, embedded and unverified browsing contexts", () => {
   for (const context of [
     { hostname: "localhost", isSecureContext: false, isTopLevel: true },
     { hostname: "localhost", isSecureContext: true, isTopLevel: false },
-    { hostname: "visualizerf1.xanderwalker.com", isSecureContext: true, isTopLevel: true },
+    { hostname: "visualizerf1.xanderwalker.com", isSecureContext: false, isTopLevel: true },
+    { hostname: "visualizerf1.xanderwalker.com", isSecureContext: true, isTopLevel: false },
+    { isSecureContext: true },
+    { isTopLevel: true },
+    { isSecureContext: "true", isTopLevel: true },
+    { isSecureContext: true, isTopLevel: "true" },
+    {},
   ]) assert.equal(isApprovedControllerOrigin(context), false);
+  assert.equal(isApprovedControllerOrigin(), false);
 });
