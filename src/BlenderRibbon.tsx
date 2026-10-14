@@ -8,6 +8,8 @@ export function BlenderRibbon({timeSeconds, playing, playbackRate, duration}: {t
   const element=useRef<HTMLVideoElement>(null);
   const masterClock=useRef({time:Number.NaN,advancedAt:-Infinity});
   const [manifest,setManifest]=useState<RibbonManifest|null>(null);
+  const [videoUrl,setVideoUrl]=useState('');
+  const [loading,setLoading]=useState(false);
   const [ready,setReady]=useState(false);
   const [error,setError]=useState('');
   const [progress,setProgress]=useState<{completed:number;total:number;message?:string}|null>(null);
@@ -32,6 +34,34 @@ export function BlenderRibbon({timeSeconds, playing, playbackRate, duration}: {t
     return()=>{cancelled=true;controller.abort();clearTimeout(timer);};
   },[]);
   useEffect(()=>{
+    if(!manifest)return;
+    let cancelled=false, objectUrl='';
+    const controller=new AbortController();
+    setReady(false);setVideoUrl('');setLoading(true);setError('');
+    const load=async()=>{
+      try {
+        // The static host does not serve byte ranges. A complete local Blob
+        // gives the media element a seekable source on both hosted and local pages.
+        const response=await fetch(manifest.src,{signal:controller.signal});
+        if(!response.ok)throw new Error(`Ribbon video could not load (HTTP ${response.status}). Reload to try again.`);
+        const blob=await response.blob();
+        if(cancelled)return;
+        if(!blob.size)throw new Error('The ribbon video file is empty. Reload to try again.');
+        objectUrl=URL.createObjectURL(new Blob([blob],{type:'video/mp4'}));
+        setVideoUrl(objectUrl);
+      } catch(cause) {
+        if(cancelled)return;
+        setLoading(false);
+        setError(cause instanceof Error?cause.message:'Ribbon video could not load. Reload to try again.');
+      }
+    };
+    void load();
+    return()=>{
+      cancelled=true;controller.abort();
+      if(objectUrl)URL.revokeObjectURL(objectUrl);
+    };
+  },[manifest]);
+  useEffect(()=>{
     if(Number.isFinite(timeSeconds)&&timeSeconds!==masterClock.current.time){
       masterClock.current={time:timeSeconds,advancedAt:performance.now()};
     }
@@ -53,5 +83,10 @@ export function BlenderRibbon({timeSeconds, playing, playbackRate, duration}: {t
     },40);
     return()=>clearInterval(watchdog);
   },[playing,ready,manifest]);
-  return <div className="blender-ribbon">{!manifest?<img className="ribbon-preview-still" src="/media/singapore-2026-ribbon-poster.jpg" alt="Preview still from this lap's Blender ribbon render"/>:null}{manifest?<video ref={element} src={manifest.src} poster={manifest.poster} muted playsInline preload="auto" aria-label="Blender-rendered Twin Ribbon of the 2026 Singapore pole lap" onLoadedMetadata={()=>{setReady(true);setError('');}} onError={()=>{setReady(false);setError('Ribbon video unavailable. Reload to try again.');}}/>:null}{error?<div className="ribbon-render-status"><span>{manifest?'RIBBON PLAYBACK ERROR':'PREVIEW STILL / RENDER IN PROGRESS'}</span><p>{error}</p>{!manifest&&progress&&progress.total>0?<small>{Math.round(progress.completed/progress.total*100)}% · {progress.completed.toLocaleString()} / {progress.total.toLocaleString()} frames</small>:null}</div>:null}</div>;
+  return <div className="blender-ribbon">
+    {!videoUrl?<img className="ribbon-preview-still" src={manifest?.poster||'/media/singapore-2026-ribbon-poster.jpg'} alt="Preview still from this lap's Blender ribbon render"/>:null}
+    {manifest&&videoUrl?<video key={videoUrl} ref={element} src={videoUrl} poster={manifest.poster} muted playsInline preload="auto" aria-label="Blender-rendered Twin Ribbon of the 2026 Singapore pole lap" onLoadedMetadata={()=>{setReady(true);setLoading(false);setError('');}} onError={()=>{setReady(false);setLoading(false);setError('Ribbon video unavailable. Reload to try again.');}}/>:null}
+    {loading?<div className="ribbon-render-status" role="status"><span>LOADING RIBBON VIDEO</span><p>Preparing the ribbon film for synchronized playback.</p></div>:null}
+    {error?<div className="ribbon-render-status" role="status"><span>{manifest?(ready?'RIBBON PLAYBACK ERROR':'RIBBON LOAD ERROR'):'PREVIEW STILL / RENDER IN PROGRESS'}</span><p>{error}</p>{!manifest&&progress&&progress.total>0?<small>{Math.round(progress.completed/progress.total*100)}% · {progress.completed.toLocaleString()} / {progress.total.toLocaleString()} frames</small>:null}</div>:null}
+  </div>;
 }
