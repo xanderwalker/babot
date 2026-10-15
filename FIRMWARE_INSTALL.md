@@ -6,6 +6,12 @@ installs firmware once, verifies it, and leads into the Singapore pole lap.
 Browser installation is a beta until its complete stock-device path has been
 observed on real BaBot hardware. Software tests do not prove physical motion.
 
+The [tagged beta release](https://github.com/xanderwalker/babot/releases/tag/v1.0.0-beta.1)
+provides the same HEX, source ZIP, manifest, and checksums as the installer.
+Its Git tag is `v1.0.0-beta.1`; the firmware identifies itself as `1.0.0`.
+The beta label describes the browser installation validation status. For normal
+setup, use these published assets rather than compiling the development branch.
+
 ## Before installing
 
 - Use the BaBot with the Arduino Leonardo / ATmega32U4 controller. Other boards

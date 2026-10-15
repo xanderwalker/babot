@@ -31,7 +31,7 @@ npm install
 npm run dev
 ```
 
-Open http://127.0.0.1:5176/ in Chrome on this Mac. `npm run build` produces the static player; `npm test` runs the motion transport and clock tests.
+Open http://127.0.0.1:5176/ in desktop Chrome or Edge. `npm run build` produces the static player; `npm test` runs the motion transport and clock tests. See the [repository README](../README.md) for Node requirements and the [agent guide](../AGENTS.md) for hardware boundaries.
 
 ## Browser firmware setup
 
@@ -59,7 +59,7 @@ It starts an isolated Chrome profile, injects a software-only Caterina/Leonardo
 fixture, and uses a generated black test video. It never requests a real USB
 device. Screenshots and results are written under ignored `qa/installer/`.
 
-For isolated browser reliability QA, run `npm run dev -- --port 5177` and open `http://127.0.0.1:5177/tests/browser/reliability.html`. This fixture replaces Web Serial with a mock, shows command counters, and offers simulated disconnect/reconnect controls. It is outside the production build. The `?cancel` variant simulates a cancelled device picker. Use a separate localhost profile or export any localhost calibration first: the fixture seeds a test record only when none exists. The October 15 results are recorded in `tests/browser/verified-2026-10-15.json`.
+For isolated browser reliability QA, run `npm run dev -- --port 5177` and open `http://127.0.0.1:5177/tests/browser/reliability.html`. This fixture replaces Web Serial with a mock, shows command counters, and offers simulated disconnect/reconnect controls. It is outside the production build. The `?cancel` variant simulates a cancelled device picker. Use a separate localhost profile or export any localhost calibration first: the fixture seeds a test record only when none exists. Local observation reports are ignored and are not included in a clone.
 
 Generated ribbon media is not committed. In a fresh clone, follow the Blender ribbon steps below to generate it; the player builds without those files.
 
@@ -134,7 +134,7 @@ Render settings and source hashes are recorded in `media/singapore-2026-corkscre
 The custom-domain player is live at https://visualizerf1.xanderwalker.com/babot.
 It is part of the existing public Lapform Site (`appgprj_6a5793fec7848191a0e76239e6100a8b`), whose source checkout is `.sites/lapform-deploy` from the repository root. Its `apps/babot` folder holds the player source and completed ribbon assets; its build generates the `/babot/` assets and standalone Worker document. Update that source snapshot when publishing player changes to the custom domain.
 
-This directory's `.openai/hosting.json` still identifies the separate private player Site. It does not publish the custom-domain route. USB permission is per origin, so the custom domain requires its own first pairing.
+The maintainer's local `.openai` hosting configuration and `.sites` checkout are ignored and are not part of a public clone. Contributors can build the static player without them. Any separate player Site configuration does not publish the custom-domain route. USB permission is per origin, so each hosted origin requires its own first pairing.
 
 ## Sources and assets
 
