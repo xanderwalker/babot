@@ -4,6 +4,13 @@ The open-source ball-balancing robot you build, program, and bring to life.
 https://www.ba-bot.com
 https://www.ba-bot.com/manual/
 
+## Install and replay
+
+Open [Set up your BaBot](https://visualizerf1.xanderwalker.com/babot/#setup) to
+install the browser firmware release, verify the controller, check mounting,
+and replay Singapore. See [installation and recovery](FIRMWARE_INSTALL.md) for
+supported hardware, the Arduino IDE fallback, and the hardware validation status.
+
 ## Singapore lap player
 
 The [web player](web-player/README.md) synchronizes the Singapore pole onboard,

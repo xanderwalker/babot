@@ -11,6 +11,34 @@ npm run dev
 
 Open http://127.0.0.1:5176/ in Chrome on this Mac. `npm run build` produces the static player; `npm test` runs the motion transport and clock tests.
 
+## Browser firmware setup
+
+Choose **Set up your BaBot**, or open [the hosted setup wizard](https://visualizerf1.xanderwalker.com/babot/#setup).
+It checks the downloadable firmware, guides the Leonardo reset/bootloader
+selection, writes and reads back application flash, checks EEPROM preservation,
+then reads the running firmware identity and release version. All device actions
+require explicit clicks; opening setup never flashes or starts motion.
+
+After setup, the player clears previous browser mounting verification and opens
+the physical axis checks. Firmware verification alone cannot authorize replay.
+The existing Singapore video, telemetry, ribbon and motion controls remain the
+first replay. See [installation and recovery](../FIRMWARE_INSTALL.md) for exact
+hardware preparation, the manual Arduino fallback and beta validation status.
+
+Firmware assets are served from `public/firmware/`. From the parent directory,
+run `python3 scripts/build-firmware.py` to rebuild them with pinned dependencies,
+or add `--check` to compare the published files with a fresh build. The installer
+engine and shared USB ownership checks are included in `npm test`.
+
+The optional browser integration runner is `tests/browser/installer-browser.mjs`.
+Run Vite on `127.0.0.1:5190`, provide Playwright (or set
+`BABOT_PLAYWRIGHT_MODULE` to its installed package path), and run it with Node.
+It starts an isolated Chrome profile, injects a software-only Caterina/Leonardo
+fixture, and uses a generated black test video. It never requests a real USB
+device. Screenshots and results are written under ignored `qa/installer/`.
+
+For isolated browser reliability QA, run `npm run dev -- --port 5177` and open `http://127.0.0.1:5177/tests/browser/reliability.html`. This fixture replaces Web Serial with a mock, shows command counters, and offers simulated disconnect/reconnect controls. It is outside the production build. The `?cancel` variant simulates a cancelled device picker. Use a separate localhost profile or export any localhost calibration first: the fixture seeds a test record only when none exists. The October 15 results are recorded in `tests/browser/verified-2026-10-15.json`.
+
 Generated ribbon media is not committed. In a fresh clone, follow the Blender ribbon steps below to generate it; the player builds without those files.
 
 The public official onboard is resolved from F1's browser playback catalog on each page load; signed CDN links are not stored. A local video can also be selected, kept entirely in the browser. Initial official-video lap start is **2.10 seconds**, visually checked against the timing stripe, broadcast lap clock and sector 1, approximately ±0.10s. Adjust sync is available for precise trimming.
@@ -19,13 +47,29 @@ The public official onboard is resolved from F1's browser playback catalog on ea
 
 - Play, pause, scrub, select a sector or change playback speed. The video is the master clock; a stalled video cannot continue hardware motion.
 - The chassis displays the actual rendered car-axis angles, with limits of 8° roll and 3° pitch. A single BaBot motion-strength control preserves that ratio: 25% (the startup default) requests up to 2° roll / 0.75° pitch, and 100% matches the chassis limits. Changing strength pauses playback and stops motion before the new gain is used. Readouts distinguish requested car-axis targets from measured physical angles; no plate-angle feedback is available.
-- The page automatically reconnects to a previously permitted Leonardo without moving it. Until the mounting check is verified, Play runs video only. With verified mounting, Play starts video and BaBot together once fresh video frames arrive. If the site has not been paired, Play or Connect opens the browser USB picker once. The official onboard uses its verified 2.10s alignment automatically; local replacement videos retain the alignment control under Adjust sync.
-- The previous 45° car-to-plate transform is an unverified starting point. **Check mounting** runs explicit, separate 1° roll and pitch pulses, each returning to level with firmware OFF confirmation. Record the observed directions; the player computes a quarter-turn/sign correction, then requires fresh checks before verification. Positive roll must lower the model’s right side; positive pitch must lower its nose. Verified mounting is saved in this browser. Reopening the check revokes prior verification; repeat it whenever the mounting changes. Pulse cancellation, faults, disconnects and stale clocks cannot authorize an observation. Pose output remains limited to a 20° vector, with one acknowledged command outstanding at up to 50 Hz.
+- The page automatically checks a previously permitted Leonardo after obtaining this site's USB ownership lock. Connection and identity checks do not send ARM or POSE commands. Until mounting is verified, Play runs video only. With verified mounting, Play starts video and BaBot together once fresh video frames arrive. If the site has not been paired, an explicit Play or Connect can open the browser USB picker. The official onboard uses its verified 2.10s alignment automatically; local replacement videos retain the alignment control under Adjust sync.
+- The previous 45° car-to-plate transform is an unverified starting point. **Check mounting** offers explicit, separate 1° roll and pitch pulses; each commands a return to level and waits for firmware OFF. Record the observed directions; the player computes a quarter-turn/sign correction, then requires fresh checks before verification. Positive roll must lower the model’s right side; positive pitch must lower its nose. Verified mounting is saved in this browser. Opening or closing the panel preserves that verification; starting an actual new pulse revokes it until both checks pass. Closing an idle panel also preserves completed observations. Mapping changes, pulse cancellation, faults, disconnects and stale clocks invalidate observations. Repeat the checks whenever the physical mounting changes. Pose output remains limited to a 20° vector, with one acknowledged command outstanding at up to 50 Hz.
 - Pause, Stop, seeking, page hiding, disconnects, controller faults and lap completion cancel motion intent. Buffering or stale frames suspend motion; the same Play session resumes automatically only after confirmed firmware OFF and fresh advancing video frames. A firmware/USB fault never resumes by itself. STOP acknowledgement and firmware EVENT OFF remain separate.
 - Recorded playback reconstructs the three short source gaps around 27s, 51s and 63s from bounded path interpolation and speed before deriving motion. This preserves the right-turn heading change near 51s instead of blending two nearly flat roll endpoints. Reconstruction is limited to 1.2s, rejects coincident spatial/speed jumps, and is labeled **RECONSTRUCTED CUE** with confidence capped at 0.35. Endpoint holds remain capped at 0.35s; the sampler cannot extrapolate beyond the lap or bridge unsupported gaps. The strict source series remains available separately. Tests cover every lap sample, off-grid confidence, missing turns and discontinuities.
 - Roll, pitch and G values are **derived cues from speed and approximate OpenF1 path**, not measured suspension or acceleration. Speed smoothing uses a 500ms neighborhood plus a 100ms causal response; heading/yaw use 750ms/650ms neighborhoods. Wider soft scales (2G longitudinal / 2.5G lateral) retain differences between corners. These recorded-data estimates can still anticipate or lag true vehicle motion; they are not measured suspension. Wheel rotation integrates recorded speed; suspension is visual only.
 
-USB control works from the hosted HTTPS player or localhost in a browser with Web Serial, such as desktop Chrome or Edge. Open the player directly in a browser tab, plug BaBot into that computer, then select Play or Connect and choose Arduino Leonardo in the browser's device picker. The browser grants USB access to that site; the connection runs directly from the browser to BaBot. After the first grant, the player reuses the remembered Leonardo port on page load or USB reconnection without opening the picker again. Connecting verifies identity without starting motion. Disconnect suspends automatic reconnection for the current page until Play or Connect is selected again or the page is reopened. If multiple permitted Leonardo ports are present, Connect lets you choose one; revoking site permission requires pairing again. The transport passes mocked firmware tests. A six-second live USB test on the connected Leonardo verified firmware identity, ARM, all 301 low-angle POSE acknowledgements, STOP, and EVENT OFF. Test limits were 1° roll and 0.75° pitch with the existing 45° mounting calibration. This confirms controller behavior; visible mechanism movement requires observation.
+USB control works from the hosted HTTPS player or localhost in a browser supporting Web Serial and Web Locks, such as desktop Chrome or Edge. Open the player directly in a browser tab, plug BaBot into that computer, then select Play or Connect and choose Arduino Leonardo in the browser's device picker. The browser grants USB access to that origin; the connection runs directly from the browser to BaBot. After the first grant, the player reuses the remembered Leonardo port on page load, USB reconnection, or wake without opening the picker automatically. If multiple permitted Leonardo ports are present, Connect lets you choose one; revoking site permission requires pairing again.
+
+One tab per origin owns the `babot-usb-controller-v1` Web Lock. A second tab stays view-only and does not open the port or send controller commands. Disconnect in the owning tab, then select Connect in the other tab to hand over control. The lock is released only after transport closure succeeds; a failed close keeps ownership. Other origins, browsers, and applications are outside that lock, so a busy USB port is reported separately. A disconnected tab also checks the lock before restoring shared calibration, without opening USB; it cannot replace an active owner's mounting.
+
+Transient connection failures receive a bounded retry sequence. Recovering the connection establishes **READY**, not replay permission: a fault, disconnect, wake, or cancelled Play requires a new Play action before ARM/POSE can resume. Buffering within an otherwise valid Play session retains the existing OFF-and-fresh-frame resume rule. Explicit Disconnect disables automatic recovery for this page until Connect, Play with verified mounting, or a new page load.
+
+**READY** means the browser has a USB connection and the expected firmware answered the identity check. It does not establish servo power, a physical level position, or successful mechanism tracking. STOP acknowledgement, firmware EVENT OFF, and visible physical motion are separate evidence. A prior six-second live USB test verified firmware identity, ARM, all 301 low-angle POSE acknowledgements, STOP, and EVENT OFF at limits of 1° roll and 0.75° pitch using the then-current 45° transform. That test established protocol behavior; power and physical movement still require observation.
+
+## Mounting backup and recovery
+
+The existing `babot.mounting.v1` browser record remains compatible. Valid saved verification survives page reloads and opening or closing **Check mounting**. Clearing site data removes that record, so export a backup to keep calibration outside browser storage.
+
+1. Open **Check mounting → Back up or restore mounting → Export backup**. Keep the downloaded `babot-mounting-backup.json` file.
+2. After storage is cleared, open the same section and load that file or paste its JSON. Restoration can be done while USB is disconnected and never starts motion.
+3. To retain a backup's verified status, explicitly check **This backup is for the same unchanged physical mount**. Otherwise, restore it as unverified and run both physical checks again. An unverified backup cannot become verified through import alone.
+
+Backups contain only the strict version 1 envelope and mounting fields: `angleDegrees`, `invertRoll`, `invertPitch`, and `verified`. Unsupported versions, unknown fields, malformed JSON, and invalid calibration values are rejected without replacing the current calibration. Motion strength and playback intent are never imported. If no backup remains after storage is cleared, repeat the mounting checks. If browser storage is unavailable, settings can remain in the current page only; retain an exported file for recovery.
 
 ## Chassis and suspension views
 
@@ -86,4 +130,4 @@ F1 media remains on its official CDN. This project does not redistribute the dow
 
 The phone recording showed a likely crossed-axis mounting, hardware limits of 8.75° roll / 8° pitch versus 8° / 3° on screen, and a missing right-turn cue around lap 51s. The software now supports observed mounting correction, linked gain, and source reconstruction. Offline comparison recovered approximately −58° of heading change over lap 50–52s (previously −3°), while reducing the first braking cue’s 20%-threshold lead from roughly 421ms to 161ms relative to the recorded brake sample. These are model diagnostics, not measured physical acceleration.
 
-The updated mounting flow and replay are covered by mocked USB/browser checks. The exact physical rotation and servo tracking still require the user’s observed axis checks; no firmware upload is required by these player changes.
+On October 15, the user confirmed that +roll lowered the right side and +pitch lowered the nose then confirmed physical replay was moving and well synchronized. These observations establish direction and observed synchronization; they do not measure the exact plate angles. The reliability update uses mocked USB regression and browser checks without moving the physical mechanism. No firmware upload is required.

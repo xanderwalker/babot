@@ -1,6 +1,12 @@
 import { useEffect, useId, useRef, useState } from 'react';
 import { deriveMountingCalibration } from './axis-calibration.mjs';
 import { validateMountingCalibration } from './protocol.mjs';
+import {
+  MAX_MOUNTING_BACKUP_LENGTH,
+  parseMountingCalibrationBackup,
+  restoreMountingCalibrationBackup,
+  serializeMountingCalibrationBackup,
+} from './motion-settings.mjs';
 import './AxisCalibrationPanel.css';
 
 export type CalibrationAxis = 'roll' | 'pitch';
@@ -21,10 +27,14 @@ export type AxisCalibrationPanelProps = {
   connected: boolean;
   busy: boolean;
   runningAxis: CalibrationAxis | null;
+  readOnly?: boolean;
+  initiallyOpen?: boolean;
+  /** Revoke previous verification when a user begins a physical check. */
+  onBeginCheck: () => void;
   /** Resolve true only after the pulse completes and controller OFF is confirmed. */
   onPulse: (axis: CalibrationAxis) => Promise<boolean>;
   onStop: () => void;
-  onApply: (config: MountingCalibration) => void;
+  onApply: (config: MountingCalibration) => void | Promise<void>;
   onOpen?: () => void;
 };
 
@@ -34,7 +44,7 @@ const emptyChecks = (mountingKey: string): Checks => ({
   pitch: { completed: false, observation: '' },
 });
 const configKey = (config: MountingCalibration) => JSON.stringify([
-  config.angleDegrees, config.invertRoll, config.invertPitch, config.verified,
+  config.angleDegrees, config.invertRoll, config.invertPitch,
 ]);
 const directions: [Direction, string][] = [
   ['right-down', 'Right side down'],
@@ -44,17 +54,23 @@ const directions: [Direction, string][] = [
 ];
 
 export function AxisCalibrationPanel({
-  mounting, connected, busy, runningAxis, onPulse, onStop, onApply, onOpen,
+  mounting, connected, busy, runningAxis, readOnly = false, initiallyOpen = false, onBeginCheck, onPulse, onStop, onApply, onOpen,
 }: AxisCalibrationPanelProps) {
   const panelId = useId();
   const mountingKey = configKey(mounting);
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(initiallyOpen);
   const [handsClear, setHandsClear] = useState(false);
   const [checks, setChecks] = useState<Checks>(() => emptyChecks(mountingKey));
   const [pendingAxis, setPendingAxis] = useState<CalibrationAxis | null>(null);
   const [message, setMessage] = useState('');
+  const [backupText, setBackupText] = useState('');
+  const [backupError, setBackupError] = useState('');
+  const [samePhysicalMount, setSamePhysicalMount] = useState(false);
+  const [saving, setSaving] = useState(false);
   const generation = useRef(0);
   const pending = useRef<symbol | null>(null);
+  const backupRead = useRef(0);
+  const applying = useRef(false);
   const appliedKey = useRef<string | null>(null);
   const latest = useRef({ mountingKey, connected, onStop });
   latest.current = { mountingKey, connected, onStop };
@@ -64,6 +80,7 @@ export function AxisCalibrationPanel({
     if (pending.current) latest.current.onStop();
     setChecks(emptyChecks(mountingKey));
     setHandsClear(false);
+    setSamePhysicalMount(false);
     if (!connected) setMessage('Connect BaBot over USB before running the checks.');
     else if (appliedKey.current !== mountingKey) setMessage('');
     appliedKey.current = null;
@@ -71,10 +88,12 @@ export function AxisCalibrationPanel({
 
   useEffect(() => () => {
     generation.current += 1;
+    backupRead.current += 1;
     if (pending.current) latest.current.onStop();
   }, []);
 
   const running = pendingAxis ?? runningAxis;
+  const editingBlocked = readOnly || busy || saving || Boolean(running);
   const currentChecks = checks.mountingKey === mountingKey ? checks : emptyChecks(mountingKey);
   const complete = currentChecks.roll.completed && currentChecks.pitch.completed;
   const observed = complete && currentChecks.roll.observation !== '' && currentChecks.pitch.observation !== '';
@@ -92,9 +111,16 @@ export function AxisCalibrationPanel({
     }
   }
 
+  let backupMounting: MountingCalibration | null = null;
+  let backupValidationError = '';
+  if (backupText.trim()) {
+    try { backupMounting = parseMountingCalibrationBackup(backupText); }
+    catch (error) { backupValidationError = error instanceof Error ? error.message : 'Invalid mounting backup.'; }
+  }
+
   const discardChecks = () => {
     generation.current += 1;
-    setChecks(emptyChecks(mountingKey));
+    setChecks(emptyChecks(latest.current.mountingKey));
     setHandsClear(false);
   };
 
@@ -106,17 +132,18 @@ export function AxisCalibrationPanel({
 
   const toggleOpen = () => {
     if (open) {
-      if (running || pending.current) onStop();
-      discardChecks();
-      setMessage('');
+      if (running || pending.current) cancel();
+      // Closing an idle panel is navigation, not a new calibration attempt.
+      setHandsClear(false);
+      setSamePhysicalMount(false);
     } else {
-      onOpen?.();
+      if (!readOnly) onOpen?.();
     }
     setOpen(!open);
   };
 
   const pulse = async (axis: CalibrationAxis) => {
-    if (!open || !handsClear || !connected || busy || running || pending.current) return;
+    if (!open || !handsClear || !connected || editingBlocked || pending.current) return;
     const token = Symbol(axis);
     const checkGeneration = generation.current;
     const startKey = mountingKey;
@@ -128,6 +155,7 @@ export function AxisCalibrationPanel({
     }));
     setMessage(`Running +${axis}: 1° pulse, then return to level and stop.`);
     try {
+      onBeginCheck();
       const completed = await onPulse(axis);
       if (generation.current !== checkGeneration || latest.current.mountingKey !== startKey) return;
       if (!completed || !latest.current.connected) {
@@ -150,16 +178,92 @@ export function AxisCalibrationPanel({
     }
   };
 
-  const apply = (verified: boolean) => {
-    if (!connected || busy || running || pending.current || !handsClear || !complete) return;
+  const apply = async (verified: boolean) => {
+    if (!connected || editingBlocked || applying.current || pending.current || !handsClear || !complete) return;
     if (verified ? !matches : !candidate) return;
     const config = validateMountingCalibration(verified ? { ...mounting, verified: true } : candidate!);
-    discardChecks();
-    appliedKey.current = configKey(config);
-    onApply(config);
-    setMessage(verified
-      ? 'Mounting verified: +roll lowers the right side and +pitch lowers the nose.'
-      : 'Correction saved as unverified. Clear the platform, repeat both checks, then verify the observed directions.');
+    applying.current = true;
+    setSaving(true);
+    try {
+      appliedKey.current = configKey(config);
+      await onApply(config);
+      discardChecks();
+      setMessage(verified
+        ? 'Mounting verified: +roll lowers the right side and +pitch lowers the nose.'
+        : 'Correction saved as unverified. Clear the platform, repeat both checks, then verify the observed directions.');
+    } catch (error) {
+      appliedKey.current = null;
+      setMessage(error instanceof Error ? error.message : 'Mounting could not be saved.');
+    } finally {
+      applying.current = false;
+      setSaving(false);
+    }
+  };
+
+  const changeBackupText = (value: string) => {
+    backupRead.current += 1;
+    setBackupText(value);
+    setSamePhysicalMount(false);
+    setBackupError('');
+  };
+
+  const loadBackupFile = async (file: File) => {
+    const token = ++backupRead.current;
+    setSamePhysicalMount(false);
+    setBackupText('');
+    setBackupError('');
+    if (file.size > MAX_MOUNTING_BACKUP_LENGTH) {
+      setBackupError('Choose a BaBot mounting backup smaller than 4 KB.');
+      return;
+    }
+    try {
+      const text = await file.text();
+      if (token === backupRead.current) setBackupText(text);
+    } catch {
+      if (token === backupRead.current) setBackupError('The backup file could not be read. Current mounting is unchanged.');
+    }
+  };
+
+  const exportBackup = () => {
+    const url = URL.createObjectURL(new Blob([serializeMountingCalibrationBackup(mounting)], { type: 'application/json' }));
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = 'babot-mounting-backup.json';
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    setBackupError('');
+  };
+
+  const restoreBackup = async () => {
+    if (editingBlocked || applying.current || pending.current) return;
+    let config: MountingCalibration;
+    try {
+      // Parse again at the action boundary; invalid input never reaches onApply.
+      config = restoreMountingCalibrationBackup(backupText, { samePhysicalMount });
+    } catch (error) {
+      setBackupError(`${error instanceof Error ? error.message : 'The backup is invalid.'} Current mounting is unchanged.`);
+      return;
+    }
+    applying.current = true;
+    setSaving(true);
+    try {
+      appliedKey.current = configKey(config);
+      await onApply(config);
+      discardChecks();
+      setSamePhysicalMount(false);
+      setBackupError('');
+      setMessage(config.verified
+        ? 'Verified mounting restored for the same physical mount. No motion started.'
+        : 'Mounting restored as unverified. Run both checks before enabling replay motion.');
+    } catch (error) {
+      appliedKey.current = null;
+      setBackupError(error instanceof Error ? error.message : 'The backup could not be saved. Check the current mounting status before continuing.');
+    } finally {
+      applying.current = false;
+      setSaving(false);
+    }
   };
 
   return <section className="axis-calibration" aria-label="BaBot mounting calibration">
@@ -175,7 +279,7 @@ export function AxisCalibrationPanel({
       <p>View from behind the model, with its nose toward the screen. Run each 1° check, then record what moved.</p>
       <p className="axis-calibration-expected">Expected: <strong>+roll → right side down</strong>; <strong>+pitch → nose down</strong>.</p>
       <label className="axis-calibration-clear">
-        <input type="checkbox" checked={handsClear} disabled={Boolean(running)} onChange={event => {
+        <input type="checkbox" checked={handsClear} disabled={readOnly || Boolean(running)} onChange={event => {
           if (!event.target.checked) discardChecks();
           else setHandsClear(true);
         }}/>
@@ -187,11 +291,11 @@ export function AxisCalibrationPanel({
           const check = currentChecks[axis];
           return <fieldset key={axis} className="axis-calibration-check">
             <legend>{index + 1}. Check {axis}</legend>
-            <button type="button" onClick={() => void pulse(axis)} disabled={!handsClear || !connected || busy || Boolean(running)}>
+            <button type="button" onClick={() => void pulse(axis)} disabled={!handsClear || !connected || editingBlocked}>
               {running === axis ? `Checking +${axis}…` : `${check.completed ? 'Repeat' : 'Run'} +${axis} · 1°`}
             </button>
             <label htmlFor={`${panelId}-${axis}`}>Observed movement</label>
-            <select id={`${panelId}-${axis}`} value={check.observation} disabled={!check.completed || !connected || busy || Boolean(running)} onChange={event => {
+            <select id={`${panelId}-${axis}`} value={check.observation} disabled={!check.completed || !connected || editingBlocked} onChange={event => {
               const observation = event.target.value as Observation;
               setChecks(previous => ({ ...previous, [axis]: { ...previous[axis], observation } }));
               setMessage('');
@@ -207,11 +311,35 @@ export function AxisCalibrationPanel({
       {running && <button type="button" className="axis-calibration-cancel" onClick={cancel}>Cancel check + stop</button>}
       {observationError && <p className="axis-calibration-hint" role="status">{observationError}</p>}
       <div className="axis-calibration-actions">
-        {candidate && <button type="button" onClick={() => apply(false)} disabled={!handsClear || !connected || busy || Boolean(running)}>Apply correction</button>}
-        <button type="button" className="axis-calibration-verify" onClick={() => apply(true)} disabled={!matches || !handsClear || !connected || busy || Boolean(running)}>Verify mounting</button>
+        {candidate && <button type="button" onClick={() => void apply(false)} disabled={!handsClear || !connected || editingBlocked}>Apply correction</button>}
+        <button type="button" className="axis-calibration-verify" onClick={() => void apply(true)} disabled={!matches || !handsClear || !connected || editingBlocked}>Verify mounting</button>
       </div>
-      <p className="axis-calibration-message" role="status" aria-live="polite">{message || 'A correction must pass two fresh checks before it can be verified.'}</p>
-      <p className="axis-calibration-footnote">Saved in this browser. Repeat these checks if the model or platform mounting changes.</p>
+      <p className="axis-calibration-message" role="status" aria-live="polite">{message || (mounting.verified
+        ? 'Saved verification is retained. Starting a new check makes the mounting unverified until both checks pass.'
+        : 'A correction must pass two fresh checks before it can be verified.')}</p>
+      <details className="axis-calibration-backup">
+        <summary>Back up or restore mounting</summary>
+        <p>Export a file to keep the calibration if browser storage is cleared. Backups contain mounting only.</p>
+        <button type="button" onClick={exportBackup}>Export backup</button>
+        <label htmlFor={`${panelId}-backup-file`}>Load a backup file</label>
+        <input id={`${panelId}-backup-file`} type="file" accept=".json,application/json" disabled={editingBlocked} onChange={event => {
+          const file = event.target.files?.[0];
+          if (file) void loadBackupFile(file);
+          event.target.value = '';
+        }}/>
+        <label htmlFor={`${panelId}-backup-text`}>Or paste backup JSON</label>
+        <textarea id={`${panelId}-backup-text`} rows={5} value={backupText} disabled={editingBlocked} spellCheck={false} onChange={event => changeBackupText(event.target.value)}/>
+        {backupMounting?.verified && <label className="axis-calibration-clear">
+          <input type="checkbox" checked={samePhysicalMount} disabled={editingBlocked} onChange={event => setSamePhysicalMount(event.target.checked)}/>
+          <span>This backup is for the same unchanged physical mount.</span>
+        </label>}
+        {backupMounting?.verified && !samePhysicalMount && <p>Without this confirmation, the mapping will be restored as unverified.</p>}
+        {(backupError || backupValidationError) && <p className="axis-calibration-hint" role="alert">{backupError || `${backupValidationError} Current mounting is unchanged.`}</p>}
+        <button type="button" onClick={() => void restoreBackup()} disabled={!backupMounting || editingBlocked}>
+          {saving ? 'Saving mounting…' : backupMounting?.verified && samePhysicalMount ? 'Restore verified mounting' : 'Restore as unverified'}
+        </button>
+      </details>
+      <p className="axis-calibration-footnote">Saved in this browser. Closing this panel keeps completed checks. Repeat them if the model or platform mounting changes.</p>
     </div>}
   </section>;
 }

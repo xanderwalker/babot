@@ -4,6 +4,7 @@ import { buildSingaporeBabotMotionSeries, createSingaporePlaybackMotionSampler }
 import { carPoseToFirmwarePose, commandedPoseDegrees, isApprovedControllerOrigin } from './protocol.mjs';
 import { BabotSerial, type BabotPose } from './babot-serial';
 import { PlaybackSession } from './playback-session.mjs';
+import { BABOT_CONNECTION_LOCK, ConnectionManager } from './connection-manager.mjs';
 import { AxisCalibrationSession } from './axis-calibration.mjs';
 import { AxisCalibrationPanel, type CalibrationAxis, type MountingCalibration } from './AxisCalibrationPanel';
 import { CHASSIS_LIMITS, DEFAULT_MOTION_STRENGTH, motionAmplitudes, readMountingCalibration, saveMountingCalibration } from './motion-settings.mjs';
@@ -28,10 +29,13 @@ const trackPath = fixture.locationSamples.filter((_,i)=>i%2===0).map((r,i)=>`${i
 function PlayIcon({playing=false}:{playing?:boolean}) { return <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor" aria-hidden="true">{playing?<path d="M6 4h4v16H6zm8 0h4v16h-4z"/>:<path d="M7 3l15 9-15 9z"/>}</svg>; }
 function Metric({label,value,unit,tone=''}:{label:string,value:string,unit?:string,tone?:string}) { return <div className={`metric ${tone}`}><span>{label}</span><div>{value}<small>{unit}</small></div></div>; }
 
-export default function App() {
+export default function App({ setupMode = false }: { setupMode?: boolean }) {
   const video = useRef<HTMLVideoElement>(null);
   const serial = useRef<BabotSerial|null>(null);
-  const autoConnect = useRef(true);
+  const connection = useRef<ConnectionManager|null>(null);
+  const ownsController = useRef(false);
+  const playRequest = useRef<symbol|null>(null);
+  const [connectionState,setConnectionState]=useState({phase:'idle',message:'Checking BaBot connection',owner:false,attempt:0,retryInMs:0});
   const session = useRef<PlaybackSession|null>(null);
   const calibration = useRef<AxisCalibrationSession|null>(null);
   const calibrationRun = useRef(false);
@@ -58,7 +62,10 @@ export default function App() {
   const [confirmed,setConfirmed]=useState(false);
   const [strength,setStrength]=useState(DEFAULT_MOTION_STRENGTH);
   const [mounting,setMounting]=useState<MountingCalibration>(()=>{
-    try { return readMountingCalibration(window.localStorage); }
+    try {
+      const saved = readMountingCalibration(window.localStorage);
+      return setupMode ? { ...saved, verified: false } : saved;
+    }
     catch { return readMountingCalibration(null); }
   });
   const [runningAxis,setRunningAxis]=useState<CalibrationAxis|null>(null);
@@ -85,11 +92,12 @@ export default function App() {
     const s=latest.current, el=video.current;
     const elapsed=lapTime(frame.current.time,s.offset,duration);
     const motion=playbackMotionAt(elapsed);
-    if(!el||calibrationRun.current||!s.mounting.verified||s.strength<=0||s.flexDemo||!s.fits||!canSendMotion({playing:!el.paused,videoMode:s.videoMode,ready:s.ready&&el.readyState>=3,seeking:el.seeking,hidden:document.hidden,ended:elapsed>=duration,confirmed:s.confirmed,valid:motion.valid,sampledAt:frame.current.stampedAt,now:performance.now()}))return null;
+    if(!el||!ownsController.current||calibrationRun.current||!s.mounting.verified||s.strength<=0||s.flexDemo||!s.fits||!canSendMotion({playing:!el.paused,videoMode:s.videoMode,ready:s.ready&&el.readyState>=3,seeking:el.seeking,hidden:document.hidden,ended:elapsed>=duration,confirmed:s.confirmed,valid:motion.valid,sampledAt:frame.current.stampedAt,now:performance.now()}))return null;
     const car=commandedPoseDegrees(motion,s.amplitudes);
     return {...carPoseToFirmwarePose(car,20,s.mounting),sampledAt:frame.current.stampedAt};
   };
   const stopMotion=useCallback((message='Motion stopped')=>{
+    playRequest.current=null;
     setStarting(false);
     calibrationRun.current=false;
     void calibration.current?.cancel(message);
@@ -100,42 +108,88 @@ export default function App() {
 
   useEffect(()=>{
     let disposed=false;
+    let manager:ConnectionManager|null=null;
     const controller = new BabotSerial((message,isConnected,isActive,detail)=>{
       if(disposed)return;
       const requested=playback.wantsMotion;
       playback.updateStatus(detail.phase,isConnected,detail.offConfirmed);
       calibrator.updateStatus(detail.phase);
       setStatus(message);setConnected(isConnected);setActive(isActive);
-      setStarting(detail.phase==='arming');setBusy(detail.phase==='connecting');
-      if(detail.phase==='fault'&&requested){video.current?.pause();setPlaying(false);}
+      setStarting(detail.phase==='arming');
+      manager?.handleStatus(detail.phase,isConnected);
+      if(detail.phase==='fault'){
+        playRequest.current=null;
+        if(requested){video.current?.pause();setPlaying(false);}
+      }
     });
     const playback=new PlaybackSession(controller,()=>currentPose.current(),(error:Error)=>{
-      if(!disposed){setStatus(error.message);video.current?.pause();setPlaying(false);}
+      if(!disposed){playRequest.current=null;setStatus(error.message);video.current?.pause();setPlaying(false);}
     });
     const calibrator=new AxisCalibrationSession(controller);
-    serial.current=controller;session.current=playback;calibration.current=calibrator;
+    manager=new ConnectionManager(controller,{
+      locks:navigator.locks,
+      isVisible:()=>!document.hidden,
+      onState:(state)=>{
+        if(disposed)return;
+        ownsController.current=state.owner;
+        setConnectionState(state);
+        setBusy(['claiming','connecting','retrying'].includes(state.phase));
+        if(state.phase!=='ready')setStatus(state.message);
+      },
+      onInvalidatePlayback:(reason)=>{
+        playRequest.current=null;
+        calibrationRun.current=false;
+        if(disposed)return;
+        video.current?.pause();setPlaying(false);setStarting(false);
+        void calibrator.cancel(reason);
+        void playback.pause(reason);
+      },
+    });
+    serial.current=controller;session.current=playback;calibration.current=calibrator;connection.current=manager;
     const usb=(navigator as Navigator & {serial?:Pick<EventTarget,'addEventListener'|'removeEventListener'>}).serial;
-    const restore=()=>{
-      if(disposed||!hasSerial||!autoConnect.current)return;
-      void controller.reconnect().catch(e=>{
-        if(!disposed){setBusy(false);setStatus(e instanceof Error?e.message:'USB reconnection failed');}
-      });
+    const recover=()=>{if(!disposed&&hasSerial)void manager?.recover('BaBot connection changed');};
+    const deviceChanged=(event:Event)=>{
+      const device=(event as Event & {port?:{getInfo?:()=>{usbVendorId?:number;usbProductId?:number}}}).port??event.target as {getInfo?:()=>{usbVendorId?:number;usbProductId?:number}}|null;
+      const info=device?.getInfo?.();
+      if(info&&(![0x2341,0x2a03].includes(info.usbVendorId??0)||info.usbProductId!==0x8036))return;
+      recover();
     };
-    const visible=()=>{if(!document.hidden)restore();};
-    usb?.addEventListener('connect',restore);document.addEventListener('visibilitychange',visible);
-    const pump=setInterval(()=>playback.tick(),40);
-    restore();
+    const visible=()=>{if(!document.hidden)recover();};
+    const pageHide=()=>{playRequest.current=null;void manager?.suspend('Page closed');};
+    const pageShow=()=>{if(!document.hidden)recover();};
+    usb?.addEventListener('connect',deviceChanged);usb?.addEventListener('disconnect',deviceChanged);
+    document.addEventListener('visibilitychange',visible);
+    window.addEventListener('pagehide',pageHide);window.addEventListener('pageshow',pageShow);
+    let lastTick=performance.now();
+    const pump=setInterval(()=>{
+      const now=performance.now();
+      if(now-lastTick>5000&&!document.hidden)void manager?.recover('Computer resumed · checking BaBot');
+      lastTick=now;playback.tick();
+    },40);
+    if(hasSerial)void manager.start();
     return ()=>{
-      disposed=true;clearInterval(pump);
-      usb?.removeEventListener('connect',restore);document.removeEventListener('visibilitychange',visible);
-      playback.dispose();
-      void calibrator.dispose();
+      disposed=true;playRequest.current=null;ownsController.current=false;clearInterval(pump);
+      usb?.removeEventListener('connect',deviceChanged);usb?.removeEventListener('disconnect',deviceChanged);
+      document.removeEventListener('visibilitychange',visible);
+      window.removeEventListener('pagehide',pageHide);window.removeEventListener('pageshow',pageShow);
+      void playback.dispose();void calibrator.dispose();void manager?.dispose();
       if(calibration.current===calibrator)calibration.current=null;
       if(serial.current===controller)serial.current=null;
       if(session.current===playback)session.current=null;
-      void controller.disconnect();
+      if(connection.current===manager)connection.current=null;
     };
   },[hasSerial]);
+  useEffect(()=>{
+    const changed=(event:StorageEvent)=>{
+      if(event.key!==null&&event.key!=='babot.mounting.v1')return;
+      pause();
+      const next=readMountingCalibration(window.localStorage);
+      latest.current.mounting=next;setMounting(next);
+      setStatus(next.verified?'Saved mounting updated · press Play when ready':'Saved mounting unavailable · check or restore calibration');
+    };
+    window.addEventListener('storage',changed);
+    return()=>window.removeEventListener('storage',changed);
+  },[pause]);
   useEffect(()=>{
     let cancelled=false;
     loadOfficialMedia().then((data:Media)=>{
@@ -184,20 +238,28 @@ export default function App() {
   const toggle=useCallback(async()=>{
     if(calibration.current?.isRunning||calibrationRun.current)return;
     setFlexDemo(false);
-    if(latest.current.playing||session.current?.wantsMotion||!video.current?.paused){pause();return;}
+    if(playRequest.current||latest.current.playing||session.current?.wantsMotion||!video.current?.paused){pause();return;}
     if(latest.current.time>=duration){setTime(0);if(video.current)video.current.currentTime=latest.current.offset;}
-    if(latest.current.videoMode){
-      if(!video.current||!latest.current.ready)return;
-      if(video.current.currentTime<latest.current.offset)video.current.currentTime=latest.current.offset;
-      if(latest.current.mounting.verified&&latest.current.strength>0){
+    if(!latest.current.videoMode){setPlaying(true);return;}
+    if(!video.current||!latest.current.ready)return;
+    if(video.current.currentTime<latest.current.offset)video.current.currentTime=latest.current.offset;
+    const request=Symbol('play');playRequest.current=request;
+    try{
+      const wantsHardware=hasSerial&&latest.current.mounting.verified&&latest.current.strength>0;
+      if(wantsHardware&&!['owned-elsewhere','port-busy','unsupported','close-failed'].includes(connectionState.phase)){
+        const ok=await connection.current?.connect();
+        if(!ok||playRequest.current!==request||document.hidden)return;
+        if(!ownsController.current)return;
         session.current?.play();
-        if(hasSerial&&!connected)void connect();
-      }else if(!latest.current.mounting.verified){setStatus('Video only · check mounting before BaBot replay');}
-      try{await video.current.play();setError('');}catch{stopMotion('Video could not play');setError('Video could not play. Try the local video picker.');}
-    }else{setPlaying(true);}
-  },[pause,stopMotion,hasSerial,connected,busy]);
+      }else if(!latest.current.mounting.verified){setStatus('Video only · check or restore mounting before BaBot replay');}
+      if(playRequest.current!==request)return;
+      await video.current.play();setError('');
+    }catch{
+      stopMotion('Playback could not start');setError('Playback could not start. Check the BaBot status and try Play again.');
+    }finally{if(playRequest.current===request)playRequest.current=null;}
+  },[pause,stopMotion,hasSerial,connectionState.phase]);
   useEffect(()=>{
-    const key=(event:KeyboardEvent)=>{if(event.code==='Space' && !/INPUT|SELECT|BUTTON|TEXTAREA|A/.test((event.target as HTMLElement).tagName)){event.preventDefault();void toggle();}if(event.key==='Escape')pause();};
+    const key=(event:KeyboardEvent)=>{if(event.code==='Space' && !event.defaultPrevented && !(event.target as HTMLElement).closest('input,select,button,textarea,a,summary,[contenteditable="true"]')){event.preventDefault();void toggle();}if(event.key==='Escape')pause();};
     window.addEventListener('keydown',key);return()=>window.removeEventListener('keydown',key);
   },[toggle,pause]);
 
@@ -206,10 +268,10 @@ export default function App() {
   const selectFile=(event:ChangeEvent<HTMLInputElement>)=>{
     const file=event.target.files?.[0];if(!file)return;userSelectedSource.current=true;pause();setReady(false);setVideoDuration(0);setConfirmed(false);setOffset(0);setTime(0);setVideoMode(true);setError('');setSourceLabel(file.name);setSource(URL.createObjectURL(file));setSyncOpen(true);
   };
-  const connect=async()=>{autoConnect.current=true;setBusy(true);try{await serial.current?.connect();}catch(e){setStatus(e instanceof Error?e.message:'Connection failed');}finally{setBusy(false);}};
-  const disconnect=()=>{autoConnect.current=false;stopMotion('USB disconnected');void serial.current?.disconnect();};
+  const connect=async()=>{pause();await connection.current?.connect();};
+  const disconnect=()=>{pause();void connection.current?.disconnect();};
   const runAxis=async(axis:CalibrationAxis):Promise<boolean>=>{
-    if(!connected||busy||calibrationRun.current||calibration.current?.isRunning||document.hidden)return false;
+    if(!ownsController.current||!connected||busy||calibrationRun.current||calibration.current?.isRunning||document.hidden)return false;
     calibrationRun.current=true;setRunningAxis(axis);setFlexDemo(false);
     video.current?.pause();setPlaying(false);
     try {
@@ -221,14 +283,22 @@ export default function App() {
     }catch(e){setStatus(e instanceof Error?e.message:'Axis check failed');return false;}
     finally{calibrationRun.current=false;setRunningAxis(null);}
   };
-  const applyMounting=(next:MountingCalibration)=>{
-    pause();latest.current.mounting=next;setMounting(next);
-    try { saveMountingCalibration(window.localStorage,next);setStatus(next.verified?'Mounting verified · press Play to replay':'Correction saved · repeat both axis checks'); }
-    catch { setStatus('Mounting retained for this page only; browser storage unavailable'); }
+  const applyMounting=(next:MountingCalibration):void|Promise<void>=>{
+    const save=()=>{
+      pause();latest.current.mounting=next;setMounting(next);
+      try { saveMountingCalibration(window.localStorage,next);setStatus(next.verified?'Mounting verified · press Play to replay':'Correction saved · repeat both axis checks'); }
+      catch { setStatus('Mounting retained for this page only; browser storage unavailable'); }
+    };
+    if(ownsController.current){save();return;}
+    if(!navigator.locks?.request)throw new Error('Cannot safely save calibration in this browser. Use Chrome or Edge.');
+    // A disconnected tab must not overwrite a live owner's shared calibration.
+    return navigator.locks.request(BABOT_CONNECTION_LOCK,{mode:'exclusive',ifAvailable:true},lock=>{
+      if(!lock)throw new Error('Another tab owns BaBot USB. Restore there or disconnect it first.');
+      save();
+    });
   };
-  const openMounting=()=>{
-    pause();
-    // A new physical check supersedes the old mounting observation immediately.
+  const openMounting=()=>{pause();};
+  const beginMountingCheck=()=>{
     if(latest.current.mounting.verified)applyMounting({...latest.current.mounting,verified:false});
   };
   const changeStrength=(value:number)=>{
@@ -241,9 +311,16 @@ export default function App() {
   const sectors=lap.sectorDurationSeconds;
   const sector=time<sectors[0]?1:time<sectors[0]+sectors[1]?2:3;
   const loaded=videoMode&&ready;
+  const controllerReadOnly=['owned-elsewhere','port-busy','unsupported','close-failed'].includes(connectionState.phase);
+  const connectionLabel=runningAxis?'Checking '+runningAxis+' axis':active?'Following video clock':controllerReadOnly?'View-only tab':connected?'USB connection verified':busy?'Connecting BaBot…':'USB disconnected';
+  const connectionBadge=runningAxis?'AXIS CHECK':active?'FOLLOWING':controllerReadOnly?'VIEW ONLY':connected?'READY':busy?'CONNECTING':'OFFLINE';
 
   return <main>
-    <header className="topbar"><a className="brand" href="#"><span className="brand-mark">b.</span><span>BABOT <em>LAP PLAYER</em></span></a></header>
+    <header className="topbar"><a className="brand" href="#"><span className="brand-mark">b.</span><span>BABOT <em>LAP PLAYER</em></span></a><a className="setup-link" href="#setup" onClick={pause}>Set up your BaBot <span aria-hidden="true">↗</span></a></header>
+    {setupMode && <section className="setup-handoff" aria-label="Finish BaBot setup">
+      <div><span className="eyebrow">FIRMWARE CHECKED · NEXT: MOUNTING</span><h2>{mounting.verified ? 'Ready for the Singapore lap.' : 'Make the motion match your model.'}</h2><p>{mounting.verified ? 'Start at 25% strength. Press Play lap when the video is ready; Pause or Level + stop returns the platform to level.' : 'Connect the separate Power Up supply, place your model with its nose toward the screen, then complete both 1° mounting checks below. Connecting USB alone never starts motion.'}</p></div>
+      <button onClick={() => document.getElementById('babot-hardware')?.scrollIntoView({ behavior: 'smooth', block: 'start' })}>{mounting.verified ? 'View motion controls' : 'Check mounting ↓'}</button>
+    </section>}
     <section className="intro"><div><div className="eyebrow">FORMULA 1 · QUALIFYING · 10 OCT 2026</div><h1>Singapore<span className="title-dot">.</span></h1></div><div className="driver"><span className="driver-number">03</span><div><span className="eyebrow">POLE POSITION</span><h2>Max Verstappen</h2><span className="driver-team">RED BULL RACING <b>1:31.373</b></span></div></div></section>
     <div className="session-strip"><span><i/> MAIN QUALIFYING / LAP {lap.lapNumber}</span><span>MARINA BAY STREET CIRCUIT</span><span>347 TELEMETRY SAMPLES <b>↗</b></span></div>
     <section className="viewer-grid">
@@ -266,7 +343,23 @@ export default function App() {
     <section className="lower-grid">
       <article className="panel chassis-panel"><div className="panel-head"><h2><span>03</span> Rolling chassis</h2><button className="concept-trigger" onClick={()=>setConceptsOpen(!conceptsOpen)}>CHASSIS CONCEPTS ↗</button></div><div className="chassis-stage"><ConceptChassis conceptId={conceptId} roll={flexDemo?Math.sin(flexPhase*.9)*8:pose.roll} pitch={flexDemo?Math.sin(flexPhase*.65)*2:pose.pitch} distanceMeters={flexDemo?0:distanceAt(distance,time)} valid={flexDemo||sample.valid}/></div><div className="flex-controls"><button onClick={()=>{pause();setFlexDemo(!flexDemo);}}>{flexDemo?'Stop flex demo':'Preview suspension flex'}</button><span>{flexDemo?'CONCEPT DEMO · VISUAL ONLY':'DERIVED POSE · CONCEPTUAL SUSPENSION'}</span></div><div className="pose-readout"><span>ROLL <b>{pose.roll>=0?'+':''}{pose.roll.toFixed(2)}°</b></span><span>PITCH <b>{pose.pitch>=0?'+':''}{pose.pitch.toFixed(2)}°</b></span><span className="muted-label">DISPLAY ANGLES</span></div></article>
       <article className="panel telemetry-panel"><div className="panel-head"><h2><span>04</span> Telemetry</h2><span className="muted-label">{sample.reconstructed?'RECONSTRUCTED CUE':sample.sourceValid?`S${sector}`:'INTERPOLATED GAP'}</span></div><div className="metrics"><Metric label="SPEED" value={String(Math.round(sample.speedKph))} unit="KM/H"/><Metric label="GEAR" value={String(sample.gear)} tone="orange"/><Metric label="ENGINE" value={(sample.rpm/1000).toFixed(1)} unit="×1000 RPM"/></div><div className="input-bars"><div><span>THROTTLE</span><div className="bar"><i style={{width:`${sample.throttlePct}%`}}/></div><b>{Math.round(sample.throttlePct)}%</b></div><div><span>BRAKE</span><div className="bar brake"><i style={{width:sample.brakeOn?'100%':'0%'}}/></div><b>{sample.brakeOn?'ON':'OFF'}</b></div></div><div className="track-row"><svg viewBox="0 0 200 120" role="img" aria-label="Position on Marina Bay circuit"><path d={trackPath} fill="none" stroke="#3a4e50" strokeWidth="3"/><circle cx={trackPoint[0]} cy={trackPoint[1]} r="5" fill="#ff7c42"/></svg><div><span className="eyebrow">ESTIMATED ACCELERATION</span><p><b>{sample.valid?sample.latG.toFixed(2):'—'}</b> lateral G</p><p><b>{sample.valid?sample.longG.toFixed(2):'—'}</b> longitudinal G</p><small>Derived from speed + path</small></div></div></article>
-      <article className="panel hardware-panel"><div className="panel-head"><h2><span>05</span> BaBot</h2><span className={`hardware-state ${active?'active':''}`}>{runningAxis?'AXIS CHECK':active?'FOLLOWING':connected?'CONNECTED':'OFFLINE'}</span></div><div className="hardware-body"><div className="connection"><span className={`status-light ${connected?'connected':''}`}/><p>{runningAxis?'Checking '+runningAxis+' axis':active?'Following video clock':connected?'USB connection verified':'USB disconnected'}<small>{usbHint}</small></p><button onClick={()=>connected?disconnect():void connect()} disabled={!hasSerial||busy||active}>{busy?'…':connected?'Disconnect':'Connect'}</button></div><div className="gain-control linked-gain"><label>Motion strength <b>{Math.round(strength*100)}%</b><input aria-label="BaBot motion strength percent" type="range" min="0" max="100" step="5" value={strength*100} disabled={runningAxis!==null} onChange={e=>changeStrength(Number(e.target.value)/100)}/></label><p>Roll ≤ {amplitudes.roll.toFixed(2)}° · Pitch ≤ {amplitudes.pitch.toFixed(2)}°</p><button disabled={runningAxis!==null||strength===1} onClick={()=>changeStrength(1)}>Match chassis · 100%</button></div><div className="motion-buttons"><span className="motion-mode">{runningAxis?'1° '+runningAxis+' check':active?'Following lap':starting?'Starting BaBot…':mounting.verified?'Motion follows Play / Pause':'Mounting check needed'}</span><button className="stop-motion" onClick={()=>pause()}>■ Level + stop</button></div><p className="serial-status" role="status">{status}</p><p className="gap-note">Roll and pitch stay in the same proportion as the chassis. At 100%, the requested angles match.</p><p className="hardware-pose">Replay target roll {hardwarePose.roll.toFixed(2)}° · pitch {hardwarePose.pitch.toFixed(2)}°<span>Car axes · requested, not measured</span></p><AxisCalibrationPanel mounting={mounting} connected={connected} busy={busy||starting} runningAxis={runningAxis} onPulse={runAxis} onStop={()=>pause()} onApply={applyMounting} onOpen={openMounting}/></div></article>
+      <article className="panel hardware-panel" id="babot-hardware">
+        <div className="panel-head"><h2><span>05</span> BaBot</h2><span className={`hardware-state ${active?'active':''}`}>{connectionBadge}</span></div>
+        <div className="hardware-body">
+          <div className="connection"><span className={`status-light ${connected?'connected':''}`}/><p>{connectionLabel}<small>{usbHint}</small></p>
+            <button onClick={()=>connected||busy?disconnect():void connect()} disabled={!hasSerial||active||runningAxis!==null}>{busy?'Cancel':connected?'Disconnect':connectionState.phase==='owned-elsewhere'?'Use this tab':'Connect'}</button>
+          </div>
+          {(controllerReadOnly||busy||connectionState.phase==='permission-required'||connectionState.phase==='fault')&&<p className="connection-notice" role="status">{connectionState.message}{connectionState.retryInMs>0&&<span>Next attempt in {(connectionState.retryInMs/1000).toFixed(1)}s.</span>}</p>}
+          <div className="gain-control linked-gain"><label>Motion strength <b>{Math.round(strength*100)}%</b><input aria-label="BaBot motion strength percent" type="range" min="0" max="100" step="5" value={strength*100} disabled={runningAxis!==null||controllerReadOnly} onChange={e=>changeStrength(Number(e.target.value)/100)}/></label><p>Roll ≤ {amplitudes.roll.toFixed(2)}° · Pitch ≤ {amplitudes.pitch.toFixed(2)}°</p><button disabled={runningAxis!==null||strength===1||controllerReadOnly} onClick={()=>changeStrength(1)}>Match chassis · 100%</button></div>
+          <div className="motion-buttons"><span className="motion-mode">{runningAxis?'1° '+runningAxis+' check':active?'Following lap':starting?'Starting BaBot…':controllerReadOnly?'Video preview only':mounting.verified?'Motion follows Play / Pause':'Mounting check needed'}</span><button className="stop-motion" onClick={()=>pause()}>{controllerReadOnly?'■ Pause preview':'■ Level + stop'}</button></div>
+          <p className="serial-status" role="status">{status}</p>
+          <p className="gap-note">Roll and pitch stay in the same proportion as the chassis. At 100%, the requested angles match.</p>
+          <p className="hardware-pose">Replay target roll {hardwarePose.roll.toFixed(2)}° · pitch {hardwarePose.pitch.toFixed(2)}°<span>Car axes · requested, not measured</span></p>
+          <p className="connection-footnote">USB verifies the controller; motor power is separate. Reconnection never starts motion.</p>
+          {!connected && <a className="firmware-help-link" href="#setup" onClick={pause}>Stock BaBot or firmware not found? Open setup →</a>}
+          <AxisCalibrationPanel mounting={mounting} connected={connected} busy={busy||starting} runningAxis={runningAxis} onPulse={runAxis} onStop={()=>pause()} onApply={applyMounting} onOpen={openMounting} onBeginCheck={beginMountingCheck} readOnly={controllerReadOnly} initiallyOpen={setupMode}/>
+        </div>
+      </article>
     </section>
     <section className="panel trace-panel"><div className="panel-head"><h2>Lap trace</h2><span className="trace-legend"><i/> SPEED <i/> THROTTLE</span><span className="muted-label">{clock(time)}</span></div><svg viewBox="0 0 1000 110" preserveAspectRatio="none" role="img" aria-label="Speed and throttle through the lap"><path d="M0 25H1000M0 60H1000M0 95H1000" stroke="#223034" strokeWidth=".7"/><path d={throttlePath} fill="none" stroke="#5faba4" strokeWidth="1.1" opacity=".6"/><path d={telemetryPath} fill="none" stroke="#f88a55" strokeWidth="1.8"/><line x1={time/duration*1000} x2={time/duration*1000} y1="0" y2="110" stroke="#e8ece6" strokeWidth="1"/></svg></section>
     <footer><p>Recorded OpenF1 telemetry. Roll, pitch and acceleration are derived cues; suspension is visual only.</p><a href={String(fixture.provenance.sourceUrls.officialQualifyingResults)} target="_blank" rel="noreferrer">Results ↗</a><a href={officialVideo} target="_blank" rel="noreferrer">Onboard ↗</a><a href="https://openf1.org/docs/" target="_blank" rel="noreferrer">Data ↗</a></footer>

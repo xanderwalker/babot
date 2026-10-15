@@ -1,0 +1,2 @@
+# Release checksums cover the exact Intel HEX bytes emitted by the compiler.
+web-player/public/firmware/*.hex -text -diff

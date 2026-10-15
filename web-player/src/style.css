@@ -19,3 +19,10 @@
 .linked-gain{display:block}.linked-gain label{display:block}.linked-gain p{font:9px 'IBM Plex Mono',monospace;color:var(--muted);margin:9px 0}.linked-gain button{font-size:9px;padding:5px 8px;color:var(--mint)}.hardware-pose{font:9px 'IBM Plex Mono',monospace;color:var(--mint);line-height:1.6;margin:10px 0}.hardware-pose span{display:block;color:var(--muted);font:9px Barlow,sans-serif}.hardware-body>.axis-calibration{grid-column:1/-1}
 
 .lower-grid{align-items:start}
+
+.connection-notice{grid-column:1/-1;padding:9px 11px;border:1px solid #5c4d32;background:#211e16;color:#edca91;font-size:11px;line-height:1.55;margin:10px 0}.connection-notice span{display:block;font-size:10px}.connection-footnote{grid-column:1/-1;color:var(--muted);font-size:9px;line-height:1.5;margin:8px 0}.connection button{white-space:nowrap}
+
+/* First-time owner handoff, kept separate from replay timing and USB state. */
+.setup-link{font-size:13px;border:1px solid var(--line);padding:10px 14px;color:var(--mint)}
+.setup-link span{margin-left:12px}.setup-handoff{display:flex;gap:28px;align-items:center;justify-content:space-between;margin:24px 0;padding:24px;border:1px solid #467268;background:#142522}.setup-handoff h2{font-family:'Barlow Condensed',Impact,sans-serif;font-size:32px;font-weight:500;margin:8px 0}.setup-handoff p{color:#b2c3bd;max-width:760px;line-height:1.6;margin:0;font-size:14px}.setup-handoff button{flex-shrink:0;color:var(--mint)}.firmware-help-link{display:block;grid-column:1/-1;color:var(--mint);font-size:12px;margin:12px 0}.route-loading{padding-top:64px;color:var(--mint)}#babot-hardware{scroll-margin-top:20px}
+@media(max-width:650px){.setup-link{font-size:11px;padding:9px}.setup-link span{margin-left:4px}.setup-handoff{align-items:flex-start;flex-direction:column;padding:18px;gap:16px}.setup-handoff h2{font-size:28px}}

@@ -24,9 +24,51 @@ export type BabotStatus = {
   phase: "disconnected" | "connecting" | "ready" | "arming" | "following" | "stopping" | "stopped" | "fault";
   lastLine: string;
   offConfirmed: boolean;
+  errorCode?: BabotConnectionErrorCode;
+  retryable?: boolean;
 };
+export type BabotConnectionErrorCode = "unsupported" | "cancelled" | "permission-denied" | "port-busy" | "firmware-mismatch" | "device-missing" | "timeout" | "transport-error";
+export class BabotConnectionError extends Error {
+  constructor(public code: BabotConnectionErrorCode, message: string, public retryable: boolean) {
+    super(message);
+    this.name = "BabotConnectionError";
+  }
+}
+/** Stable recovery categories; only the coordinator decides when to retry. */
+export function classifyBabotConnectionError(error: unknown, stage = "transport"): BabotConnectionError {
+  if (error instanceof BabotConnectionError) return error;
+  const name = error instanceof Error ? error.name : "";
+  const message = error instanceof Error ? error.message : String(error || "USB connection failed");
+  if (stage === "chooser" && (name === "NotFoundError" || name === "AbortError" || /cancel|no port selected/i.test(message))) {
+    return new BabotConnectionError("cancelled", "USB selection cancelled · select Connect when ready", false);
+  }
+  if (name === "SecurityError" || name === "NotAllowedError" || /permission denied|permission revoked/i.test(message)) {
+    return new BabotConnectionError("permission-denied", "USB permission unavailable · allow access in this browser", false);
+  }
+  if (stage === "open" && (name === "InvalidStateError" || /busy|already open|in use|failed to open serial port|access denied/i.test(message))) {
+    return new BabotConnectionError("port-busy", "BaBot USB is in use · close its other tab, browser, or serial monitor", false);
+  }
+  if (name === "NotFoundError" || /device.*(missing|disconnected|not found)|no.*device/i.test(message)) {
+    return new BabotConnectionError("device-missing", "BaBot USB is not available · waiting for the device", true);
+  }
+  if (name === "TimeoutError" || /timed? out|timeout/i.test(message)) {
+    return new BabotConnectionError("timeout", message, true);
+  }
+  if (name === "NotSupportedError") return new BabotConnectionError("unsupported", message, false);
+  return new BabotConnectionError("transport-error", message, true);
+}
 type StatusListener = (message: string, connected: boolean, active: boolean, detail: BabotStatus) => void;
 type Pending = { id: number; verb: string; resolve(line: string): void; reject(error: Error): void; timer: ReturnType<typeof setTimeout> };
+type Connection = {
+  port: Port;
+  reader: ReadableStreamDefaultReader<Uint8Array> | null;
+  writer: WritableStreamDefaultWriter<Uint8Array> | null;
+  readTask: Promise<void> | null;
+  openTask: Promise<void> | null;
+  closeTask: Promise<void> | null;
+  opened: boolean;
+  closing: boolean;
+};
 const delay = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 const CONTROLLER_FILTERS = [
   { usbVendorId: 0x2341, usbProductId: 0x8036 },
@@ -35,18 +77,17 @@ const CONTROLLER_FILTERS = [
 
 /** One acknowledged command at a time. No stale-pose backlog or automatic re-arm. */
 export class BabotSerial {
-  private port: Port | null = null;
-  private reader: ReadableStreamDefaultReader<Uint8Array> | null = null;
-  private writer: WritableStreamDefaultWriter<Uint8Array> | null = null;
-  private readTask: Promise<void> | null = null;
+  private connection: Connection | null = null;
+  private get port() { return this.connection?.port ?? null; }
+  private get writer() { return this.connection?.writer ?? null; }
   private pending: Pending | null = null;
   private inFlight: Promise<string> | null = null;
   private opening: Promise<boolean> | null = null;
   private stopping: Promise<StopResult> | null = null;
+  private disconnecting: Promise<StopResult> | null = null;
   private sequence = 0;
   private generation = 0;
   private connectionGeneration = 0;
-  private closing = false;
   private verified = false;
   private following = false;
   private active = false;
@@ -59,9 +100,10 @@ export class BabotSerial {
 
   constructor(private onStatus: StatusListener) {}
 
-  private status(message: string, phase: BabotStatus["phase"]) {
+  private status(message: string, phase: BabotStatus["phase"], error?: BabotConnectionError) {
     this.onStatus(message, this.verified && Boolean(this.port), this.active,
-      { phase, lastLine: this.lastLine, offConfirmed: this.offConfirmed });
+      { phase, lastLine: this.lastLine, offConfirmed: this.offConfirmed,
+        ...(error ? { errorCode: error.code, retryable: error.retryable } : {}) });
   }
 
   private rejectPending(message: string) {
@@ -72,7 +114,7 @@ export class BabotSerial {
     pending.reject(new Error(message));
   }
 
-  private fault(message: string, firmwareDisarmed = false) {
+  private fault(message: string, firmwareDisarmed = false, error?: BabotConnectionError) {
     this.generation++;
     this.active = false;
     this.following = false;
@@ -83,7 +125,7 @@ export class BabotSerial {
       this.offConfirmed = false;
     }
     this.rejectPending(message);
-    this.status(message, "fault");
+    this.status(message, "fault", error);
     if (!firmwareDisarmed && this.mayBeArmed && !this.stopping) {
       void this.stop(message);
     }
@@ -125,21 +167,24 @@ export class BabotSerial {
       } else if (!this.stopping) {
         this.status("Firmware reports OFF · level return complete", this.verified ? "stopped" : "fault");
       }
-    } else if (line.startsWith("READY ") && this.mayBeArmed) {
+    } else if (line.startsWith("READY ") && (this.verified || this.mayBeArmed || this.returning || this.following)) {
       this.mayBeArmed = false;
+      this.returning = false;
+      this.offConfirmed = false;
       this.fault("Firmware restarted · reconnect before replay");
     }
   }
 
-  private async read() {
-    const reader = this.reader!;
+  private async read(connection: Connection) {
+    const reader = connection.reader!;
     const decoder = new TextDecoder();
     let buffer = "";
     try {
-      while (!this.closing) {
+      while (!connection.closing && this.connection === connection) {
         const { value, done } = await reader.read();
+        if (connection.closing || this.connection !== connection) break;
         if (done) {
-          if (!this.closing) this.fault("USB disconnected · motion stopped");
+          this.fault("USB disconnected · motion stopped");
           break;
         }
         buffer += decoder.decode(value, { stream: true });
@@ -151,7 +196,7 @@ export class BabotSerial {
         }
       }
     } catch (error) {
-      if (!this.closing) this.fault(error instanceof Error ? error.message : "USB read failed");
+      if (!connection.closing && this.connection === connection) this.fault(error instanceof Error ? error.message : "USB read failed");
     }
   }
 
@@ -166,13 +211,15 @@ export class BabotSerial {
     } catch (error) { return Promise.reject(error); }
     const writer = this.writer;
     const reply = new Promise<string>((resolve, reject) => {
+      let pending: Pending;
       const timer = setTimeout(() => {
-        if (this.pending?.id === id) this.pending = null;
+        if (this.pending === pending) this.pending = null;
         reject(new Error(`${verb} acknowledgement timed out`));
       }, timeout);
-      this.pending = { id, verb, resolve, reject, timer };
+      pending = { id, verb, resolve, reject, timer };
+      this.pending = pending;
       void writer.write(new TextEncoder().encode(wire)).catch(() => {
-        if (this.pending?.id === id) this.rejectPending("USB write failed");
+        if (this.pending === pending) this.rejectPending("USB write failed");
       });
     });
     const tracked = reply.finally(() => { if (this.inFlight === tracked) this.inFlight = null; });
@@ -195,62 +242,111 @@ export class BabotSerial {
   }
 
   private beginConnection(allowChooser: boolean): Promise<boolean> {
-    if (this.verified) return Promise.resolve(true);
-    if (this.opening) return this.opening;
     const generation = this.connectionGeneration;
-    this.opening = this.open(generation, allowChooser).finally(() => { this.opening = null; });
-    return this.opening;
+    if (this.disconnecting) {
+      return this.disconnecting.then(() => generation === this.connectionGeneration
+        ? this.beginConnection(allowChooser) : false);
+    }
+    if (this.opening) return this.opening;
+    // Revalidation must never insert a command into a motion or level return.
+    if (this.following || this.active || this.mayBeArmed || this.returning || this.stopping || this.inFlight) {
+      return Promise.resolve(this.verified);
+    }
+    const opening = this.open(generation, allowChooser).finally(() => {
+      if (this.opening === opening) this.opening = null;
+    });
+    this.opening = opening;
+    return opening;
   }
 
   private async open(generation: number, allowChooser: boolean) {
-    if (!isApprovedControllerOrigin({ isSecureContext: window.isSecureContext, isTopLevel: window.top === window.self })) {
-      throw new Error("Open the player directly in a secure browser tab (HTTPS or localhost) to connect BaBot");
-    }
-    const api = (navigator as Navigator & { serial?: Serial }).serial;
-    if (!api) throw new Error("USB control requires desktop Chrome with Web Serial");
-    this.status("Checking remembered BaBot permission", "connecting");
-    const granted = await api.getPorts();
-    if (generation !== this.connectionGeneration) return false;
-    const eligible = granted.filter((port) => {
-      const info = port.getInfo();
-      return CONTROLLER_FILTERS.some((filter) => info.usbVendorId === filter.usbVendorId && info.usbProductId === filter.usbProductId);
-    });
-    let selected: Port;
-    if (eligible.length === 1) {
-      selected = eligible[0];
-      this.status("Reconnecting remembered BaBot", "connecting");
-    } else {
-      if (!allowChooser) {
-        this.status(eligible.length > 1 ? "Multiple remembered controllers · select Connect to choose BaBot" : "Select Connect to grant BaBot USB access once", "disconnected");
-        return false;
-      }
-      this.status("Choose BaBot / Arduino Leonardo", "connecting");
-      selected = await api.requestPort({ filters: CONTROLLER_FILTERS });
-    }
-    if (generation !== this.connectionGeneration) return false;
-    if (this.port) { await this.stop(); await this.close(); }
-    if (generation !== this.connectionGeneration) return false;
-    this.closing = false;
-    this.port = selected;
-    this.sequence = 0;
-    this.offConfirmed = false;
+    let stage = "context";
+    let owned: Connection | null = null;
     try {
-      await selected.open({ baudRate: BABOT_PROTOCOL.baudRate });
-      if (generation !== this.connectionGeneration) { await this.close(); return false; }
+      if (!isApprovedControllerOrigin({ isSecureContext: window.isSecureContext, isTopLevel: window.top === window.self })) {
+        throw new BabotConnectionError("unsupported", "Open the player directly in a secure browser tab (HTTPS or localhost) to connect BaBot", false);
+      }
+      const api = (navigator as Navigator & { serial?: Serial }).serial;
+      if (!api) throw new BabotConnectionError("unsupported", "USB control requires desktop Chrome with Web Serial", false);
+      if (this.verified && this.connection) {
+        const existing = this.connection;
+        this.status("Checking BaBot connection", "connecting");
+        try {
+          await this.identify();
+          if (generation !== this.connectionGeneration || this.connection !== existing) return false;
+          this.status("BaBot firmware verified · ready for replay", "ready");
+          return true;
+        } catch (error) {
+          if (generation !== this.connectionGeneration) return false;
+          const failure = classifyBabotConnectionError(error, "probe");
+          this.fault(failure.message, false, failure);
+          if (generation !== this.connectionGeneration) return false;
+          if (failure.code === "firmware-mismatch") throw failure;
+          // One stale idle link can be reopened. Repeated attempts belong to the
+          // connection coordinator, with its bounded retry/backoff policy.
+          await this.close(existing);
+        }
+      }
+      this.status("Checking remembered BaBot permission", "connecting");
+      stage = "permission";
+      const granted = await api.getPorts();
+      if (generation !== this.connectionGeneration) return false;
+      const eligible = granted.filter((port) => {
+        const info = port.getInfo();
+        return CONTROLLER_FILTERS.some((filter) => info.usbVendorId === filter.usbVendorId && info.usbProductId === filter.usbProductId);
+      });
+      let selected: Port;
+      if (eligible.length === 1) {
+        selected = eligible[0];
+        this.status("Reconnecting remembered BaBot", "connecting");
+      } else {
+        if (!allowChooser) {
+          this.status(eligible.length > 1 ? "Multiple remembered controllers · select Connect to choose BaBot" : "Select Connect to grant BaBot USB access once", "disconnected");
+          return false;
+        }
+        this.status("Choose BaBot / Arduino Leonardo", "connecting");
+        stage = "chooser";
+        selected = await api.requestPort({ filters: CONTROLLER_FILTERS });
+      }
+      if (generation !== this.connectionGeneration) return false;
+      if (this.connection) await this.close(this.connection);
+      if (generation !== this.connectionGeneration) return false;
+      owned = { port: selected, reader: null, writer: null, readTask: null, openTask: null, closeTask: null, opened: false, closing: false };
+      this.connection = owned;
+      this.sequence = 0;
+      this.offConfirmed = false;
+      stage = "open";
+      const connection = owned;
+      connection.openTask = selected.open({ baudRate: BABOT_PROTOCOL.baudRate }).then(() => { connection.opened = true; });
+      await connection.openTask;
+      if (generation !== this.connectionGeneration || connection.closing) { await this.close(connection); return false; }
       if (!selected.readable || !selected.writable) throw new Error("USB data streams unavailable");
-      this.reader = selected.readable.getReader();
-      this.writer = selected.writable.getWriter();
-      this.readTask = this.read();
-      const line = await this.send("PING", undefined, 1500);
-      if (!/^ACK \d+ PING BABOT_MOTION 1$/.test(line)) throw new Error("BaBot Motion firmware v1 was not identified");
-      if (generation !== this.connectionGeneration) { await this.close(); return false; }
+      connection.reader = selected.readable.getReader();
+      connection.writer = selected.writable.getWriter();
+      connection.readTask = this.read(connection);
+      stage = "identity";
+      await this.identify();
+      if (generation !== this.connectionGeneration || this.connection !== connection) { await this.close(connection); return false; }
       this.verified = true;
       this.status("BaBot firmware verified · ready for replay", "ready");
       return true;
     } catch (error) {
-      await this.close();
-      this.status(error instanceof Error ? error.message : "USB connection failed", "fault");
-      throw error;
+      // A superseded chooser/read/open result cannot tear down a newer link or
+      // publish a fault into its UI. Disconnect owns cleanup of an opening port.
+      if (generation !== this.connectionGeneration) return false;
+      let failure = classifyBabotConnectionError(error, stage);
+      try { await this.close(owned ?? this.connection); }
+      catch (closeError) { failure = classifyBabotConnectionError(closeError, "close"); }
+      this.verified = false;
+      this.status(failure.message, "fault", failure);
+      throw failure;
+    }
+  }
+
+  private async identify() {
+    const line = await this.send("PING", undefined, 1500);
+    if (!/^ACK \d+ PING BABOT_MOTION 1$/.test(line)) {
+      throw new BabotConnectionError("firmware-mismatch", "BaBot Motion firmware v1 was not identified", false);
     }
   }
 
@@ -262,6 +358,7 @@ export class BabotSerial {
 
   async start(getPose: () => BabotPose | null): Promise<void> {
     const beforeStop = this.generation;
+    if (this.opening) await this.opening;
     if (this.stopping) await this.stopping;
     if (beforeStop !== this.generation) return;
     if (!this.verified || !this.writer) throw new Error("Connect and verify BaBot before starting");
@@ -271,8 +368,7 @@ export class BabotSerial {
     const generation = ++this.generation;
     this.following = true;
     try {
-      const identity = await this.send("PING", undefined, 1500);
-      if (!/^ACK \d+ PING BABOT_MOTION 1$/.test(identity)) throw new Error("BaBot firmware verification failed");
+      await this.identify();
       if (generation !== this.generation) return;
       if (!this.usablePose(getPose())) { await this.stop("Video pose unavailable · motion stopped"); return; }
       this.status("Arming BaBot", "arming");
@@ -294,7 +390,8 @@ export class BabotSerial {
       }
     } catch (error) {
       if (generation === this.generation) {
-        this.fault(error instanceof Error ? error.message : "BaBot motion failed");
+        const failure = classifyBabotConnectionError(error);
+        this.fault(failure.message, false, failure);
       }
     } finally {
       if (generation === this.generation) this.following = false;
@@ -363,31 +460,67 @@ export class BabotSerial {
   }
 
   async disconnect(): Promise<StopResult> {
+    if (this.disconnecting) return this.disconnecting;
     this.connectionGeneration++;
-    const result = await this.stop("Disconnecting BaBot");
-    if (this.opening) { try { await this.opening; } catch {} }
-    await this.close();
-    this.status("USB disconnected", "disconnected");
-    return result;
+    // A browser picker cannot be cancelled programmatically. Invalidate its
+    // result without holding the port lease until a person dismisses it.
+    this.opening = null;
+    if (this.pending?.verb === "PING") this.rejectPending("USB connection cancelled");
+    const disconnecting = (async () => {
+      const result = await this.stop("Disconnecting BaBot");
+      try {
+        await this.close();
+        this.status("USB disconnected", "disconnected");
+        return result;
+      } catch (error) {
+        const failure = classifyBabotConnectionError(error, "close");
+        this.status(failure.message, "fault", failure);
+        throw failure;
+      }
+    })().finally(() => {
+      if (this.disconnecting === disconnecting) this.disconnecting = null;
+    });
+    this.disconnecting = disconnecting;
+    return disconnecting;
   }
 
-  private async close() {
-    this.closing = true;
-    this.verified = false;
-    this.active = false;
-    this.following = false;
-    this.rejectPending("USB connection closed");
-    try { await this.reader?.cancel(); } catch {}
-    try { await this.readTask; } catch {}
-    try { this.reader?.releaseLock(); } catch {}
-    try { this.writer?.releaseLock(); } catch {}
-    try { await this.port?.close(); } catch {}
-    this.reader = null;
-    this.writer = null;
-    this.port = null;
-    this.readTask = null;
-    this.inFlight = null;
-    this.mayBeArmed = false;
-    this.returning = false;
+  private async close(connection = this.connection): Promise<void> {
+    if (!connection) return;
+    if (connection.closeTask) return connection.closeTask;
+    connection.closing = true;
+    if (this.connection === connection) {
+      this.verified = false;
+      this.active = false;
+      this.following = false;
+      this.rejectPending("USB connection closed");
+    }
+    const closing = (async () => {
+      // Disconnect during port.open must wait for that real ownership to be
+      // released. Waiting for the whole connection attempt would deadlock.
+      try { await connection.openTask; } catch {}
+      try { await connection.reader?.cancel(); } catch {}
+      try { await connection.readTask; } catch {}
+      try { connection.reader?.releaseLock(); } catch {}
+      try { connection.writer?.releaseLock(); } catch {}
+      connection.reader = null;
+      connection.writer = null;
+      connection.readTask = null;
+      if (connection.opened) {
+        // Failure must retain the resource and reject: callers cannot release
+        // the cross-tab ownership lease until port closure is confirmed.
+        await connection.port.close();
+        connection.opened = false;
+      }
+      if (this.connection === connection) {
+        this.connection = null;
+        this.inFlight = null;
+        this.mayBeArmed = false;
+        this.returning = false;
+      }
+    })().finally(() => {
+      if (connection.closeTask === closing) connection.closeTask = null;
+    });
+    connection.closeTask = closing;
+    return closing;
   }
 }

@@ -57,3 +57,12 @@ coverage/
 __pycache__/
 *.pyc
 *.tsbuildinfo
+
+# Downloadable, checksum-verified firmware release
+!web-player/public/firmware/*.hex
+
+# Local device observations and personal calibration exports
+/calibration-backups/
+/reliability-evidence/
+/qa/
+web-player/tests/browser/verified-*.json

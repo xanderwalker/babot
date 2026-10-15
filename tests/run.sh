@@ -22,4 +22,5 @@ c++ -std=c++11 -Wall -Wextra -Werror \
   "$test_dir/../ServoOutput.cpp" \
   -o "$build_dir/servo_output_test"
 "$build_dir/servo_output_test"
+python3 "$test_dir/firmware_release_test.py"
 echo "external protocol tests passed"

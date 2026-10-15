@@ -1,0 +1,46 @@
+BaBot Motion 1.0.0 — Arduino IDE fallback installation
+
+This source archive contains the same firmware as the website installer.
+It is for BaBot's Arduino Leonardo / ATmega32U4 controller, with its original
+Caterina bootloader. It is not for Uno, Nano, Micro, or ESP32 boards.
+
+1. Remove the ball and model. Disconnect BaBot's separate motor power supply.
+   Connect a USB data cable to the port labeled Upload Code on BaBot.
+2. Close other tabs or apps using the robot's serial port, including the web
+   player. Extract this ZIP and open babot/babot.ino in Arduino IDE.
+3. In Boards Manager, install Arduino AVR Boards version 1.8.8.
+   Select Tools > Board > Arduino AVR Boards > Arduino Leonardo.
+4. In Library Manager, install Servo 1.3.0 and CD74HC4067 1.0.2.
+5. Select BaBot's Leonardo port, then use the normal Upload button. Do not use
+   Burn Bootloader or Upload Using Programmer. Normal Caterina uploads change
+   application flash, preserving the bootloader and stored servo calibration.
+6. If the upload fails, keep motor power disconnected. Close Serial Monitor,
+   reconnect USB, select the Leonardo port again, and retry normal Upload.
+   Arduino's Leonardo recovery instructions are at:
+   https://docs.arduino.cc/retired/getting-started-guides/ArduinoLeonardoMicro
+7. After Upload finishes, close Arduino's Serial Monitor and return to the
+   website. Connect and verify BaBot Motion 1.0.0. Keep motor power off until
+   the setup flow asks you to perform the unloaded, small-angle mounting check.
+
+The new firmware starts in OFF mode and levels the platform. Existing physical
+button calibration and ball-balancing modes remain available. OFF does not
+disconnect electrical power; the separate motor supply stays disconnected
+during installation. Never assume calibration is correct merely because an
+upload succeeded.
+
+Build and inspect without uploading
+----------------------------------
+Install Python 3 and Arduino CLI 1.5.1, then from the extracted babot directory:
+
+    python3 scripts/build-firmware.py
+
+The script uses sketch.yaml's exact dependency versions in an isolated Arduino
+profile, validates the application address range, and writes the website HEX,
+source ZIP, checksums, and manifest under web-player/public/firmware/. It never
+opens a serial port or uploads. For a direct compile without packaging:
+
+    arduino-cli compile --profile babot-release .
+
+Included dependency source is under third-party/ for inspection and modification;
+the pinned profile fetches upstream packages rather than compiling those copies.
+See THIRD_PARTY_NOTICES.txt and LICENSE for attribution and license details.

@@ -1,0 +1,8 @@
+profiles:
+  babot-release:
+    fqbn: arduino:avr:leonardo
+    platforms:
+      - platform: arduino:avr (1.8.8)
+    libraries:
+      - Servo (1.3.0)
+      - CD74HC4067 (1.0.2)

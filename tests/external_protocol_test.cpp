@@ -29,6 +29,15 @@ int main() {
   assert(command.type == EXTERNAL_COMMAND_PING);
   assert(command.sequence == 1);
 
+  assert(feed(parser, "INFO 2\n", command, error) == EXTERNAL_FEED_COMMAND);
+  assert(command.type == EXTERNAL_COMMAND_INFO);
+  assert(command.sequence == 2);
+  assert(std::string(externalCommandName(command.type)) == "INFO");
+  assert(feed(parser, "INFO 0\n", command, error) == EXTERNAL_FEED_ERROR);
+  assert(error == EXTERNAL_PARSE_BAD_SEQUENCE);
+  assert(feed(parser, "INFO 2 extra\n", command, error) == EXTERNAL_FEED_ERROR);
+  assert(error == EXTERNAL_PARSE_BAD_ARITY);
+
   assert(feed(parser, "ARM ", command, error) == EXTERNAL_FEED_NONE);
   assert(feed(parser, "42\r\n", command, error) == EXTERNAL_FEED_COMMAND);
   assert(command.type == EXTERNAL_COMMAND_ARM);

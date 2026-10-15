@@ -29,6 +29,22 @@ control, changes the armed session sequence, or refreshes the motion watchdog.
 A controller must require product `BABOT_MOTION` and protocol version `1` before
 enabling motion.
 
+Firmware releases also support a read-only detail probe:
+
+```text
+INFO 2
+ACK 2 INFO BABOT_MOTION 1 VERSION 1.0.0 BOARD ATMEGA32U4 OFFSETS 75 75 75
+```
+
+The three integer offsets are the active A/B/C servo calibration values after
+the existing 50–150 boot clamp, not an identity for the robot. `INFO` has the
+same stateless behavior as `PING`: it is accepted in every mode and neither
+writes EEPROM nor refreshes the watchdog. Older development firmware may
+answer `NACK 0 BAD_COMMAND`; its exact `PING` reply remains compatible, but it
+cannot confirm an installed release. The installer verifies the release with
+`INFO` after flashing. The versioned binary and source archive are built with
+`python3 scripts/build-firmware.py`.
+
 ## Motion commands
 
 ```text

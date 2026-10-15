@@ -13,6 +13,7 @@
 #include <math.h>
 #include <EEPROM.h>
 #include "ExternalProtocol.h"
+#include "FirmwareVersion.h"
 #include "ServoOutput.h"
 
 static_assert(BABOT_SERVO_MIN_MICROSECONDS == MIN_PULSE_WIDTH,
@@ -355,6 +356,14 @@ void sendExternalAck(const ExternalCommand &command) {
   Serial.print(externalCommandName(command.type));
   if (command.type == EXTERNAL_COMMAND_PING) {
     Serial.print(F(" BABOT_MOTION 1"));
+  } else if (command.type == EXTERNAL_COMMAND_INFO) {
+    Serial.print(F(" BABOT_MOTION 1 VERSION " BABOT_FIRMWARE_VERSION
+                   " BOARD ATMEGA32U4 OFFSETS "));
+    Serial.print(servoOffsetA);
+    Serial.print(' ');
+    Serial.print(servoOffsetB);
+    Serial.print(' ');
+    Serial.print(servoOffsetC);
   }
   Serial.println();
 }
@@ -412,9 +421,10 @@ void enterExternalMode(const ExternalCommand &command) {
 }
 
 void handleExternalCommand(const ExternalCommand &command) {
-  // PING is deliberately stateless so a newly opened host can identify the
-  // firmware without arming or disturbing an active session sequence.
-  if (command.type == EXTERNAL_COMMAND_PING) {
+  // Identification is deliberately stateless: neither command arms, moves,
+  // writes EEPROM, changes the session sequence, or refreshes the watchdog.
+  if (command.type == EXTERNAL_COMMAND_PING ||
+      command.type == EXTERNAL_COMMAND_INFO) {
     sendExternalAck(command);
     return;
   }

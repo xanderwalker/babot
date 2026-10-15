@@ -64,6 +64,7 @@ bool parseDecimal(const char *token, float &value) {
 
 ExternalCommandType parseCommandName(const char *token) {
   if (strcmp(token, "PING") == 0) return EXTERNAL_COMMAND_PING;
+  if (strcmp(token, "INFO") == 0) return EXTERNAL_COMMAND_INFO;
   if (strcmp(token, "ARM") == 0) return EXTERNAL_COMMAND_ARM;
   if (strcmp(token, "POSE") == 0) return EXTERNAL_COMMAND_POSE;
   if (strcmp(token, "LEVEL") == 0) return EXTERNAL_COMMAND_LEVEL;
@@ -239,6 +240,7 @@ void externalStepTowardVector(float currentRollDeg, float currentPitchDeg,
 const char *externalCommandName(ExternalCommandType type) {
   switch (type) {
     case EXTERNAL_COMMAND_PING:  return "PING";
+    case EXTERNAL_COMMAND_INFO:  return "INFO";
     case EXTERNAL_COMMAND_ARM:   return "ARM";
     case EXTERNAL_COMMAND_POSE:  return "POSE";
     case EXTERNAL_COMMAND_LEVEL: return "LEVEL";

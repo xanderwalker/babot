@@ -1,0 +1,52 @@
+name: Verify firmware release
+
+on:
+  pull_request:
+    paths:
+      - '*.ino'
+      - '*.cpp'
+      - '*.h'
+      - sketch.yaml
+      - PROTOCOL.md
+      - LICENSE
+      - firmware/**
+      - scripts/build-firmware.py
+      - tests/**
+      - web-player/public/firmware/**
+      - .github/workflows/firmware-release.yml
+  push:
+    branches: [main]
+    paths:
+      - '*.ino'
+      - '*.cpp'
+      - '*.h'
+      - sketch.yaml
+      - PROTOCOL.md
+      - LICENSE
+      - firmware/**
+      - scripts/build-firmware.py
+      - tests/**
+      - web-player/public/firmware/**
+      - .github/workflows/firmware-release.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: arduino/setup-arduino-cli@v2
+        with:
+          version: 1.5.1
+      - name: Run firmware host tests
+        run: ./tests/run.sh
+      - name: Rebuild pinned release and compare website downloads
+        run: python3 scripts/build-firmware.py --check
+      - uses: actions/upload-artifact@v4
+        with:
+          name: babot-motion-firmware
+          path: web-player/public/firmware/
+          if-no-files-found: error
