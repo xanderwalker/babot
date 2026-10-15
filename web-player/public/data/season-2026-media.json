@@ -1,0 +1,687 @@
+{
+  "schemaVersion": 1,
+  "season": 2026,
+  "updatedAtUtc": "2026-10-15T18:02:26.349Z",
+  "events": {
+    "australia": {
+      "videoId": "1858990719444929099",
+      "officialPageUrl": "https://www.formula1.com/en/video/onboard-george-russells-pirelli-pole-position-award-lap-at-the-australian-grand-prix.1858990719444929099",
+      "title": "ONBOARD: George Russell’s Pirelli Pole Position Award lap at the Australian Grand Prix",
+      "driverName": "George Russell",
+      "lapDurationSeconds": 78.518,
+      "catalogLapDurationSeconds": 78.518,
+      "lapStartSeconds": 2,
+      "syncStatus": "verified",
+      "syncEvidence": [
+        {
+          "videoSeconds": 2,
+          "observed": "Broadcast clock 0.0 at the start of the timed lap; driver graphic and track checked."
+        },
+        {
+          "videoSeconds": 10,
+          "observed": "Running broadcast clock 8.0."
+        },
+        {
+          "videoSeconds": 29.798,
+          "observed": "Sector 1 graphic 27.498, matching the OpenF1 pole-lap sector exactly."
+        },
+        {
+          "videoSeconds": 50,
+          "observed": "Running broadcast clock 48.0."
+        },
+        {
+          "videoSeconds": 85.518,
+          "observed": "Final broadcast lap result 1:18.518, matching the OpenF1 pole lap."
+        }
+      ],
+      "offsetNote": "Frame-checked against the running broadcast clock, exact sector timing, and lap completion. Broadcast clock displays tenths; estimated alignment uncertainty is ±0.15 s. User trim remains available.",
+      "estimatedUncertaintySeconds": 0.15,
+      "sourceDurationSeconds": 100.331,
+      "publishedAtUtc": "2026-03-07T08:28:15.620Z"
+    },
+    "china": {
+      "videoId": "1859630054097152056",
+      "officialPageUrl": "https://www.formula1.com/en/video/onboard-kimi-antonellis-pirelli-pole-position-award-lap-at-the-chinese-grand-prix.1859630054097152056",
+      "title": "ONBOARD: Kimi Antonelli's Pirelli Pole Position Award lap at the Chinese Grand Prix",
+      "driverName": "Kimi Antonelli",
+      "lapDurationSeconds": 92.064,
+      "catalogLapDurationSeconds": 92.064,
+      "lapStartSeconds": 2,
+      "syncStatus": "verified",
+      "syncEvidence": [
+        {
+          "videoSeconds": 2,
+          "observed": "Broadcast clock 0.0 at the start of the timed lap; driver graphic and track checked."
+        },
+        {
+          "videoSeconds": 10,
+          "observed": "Running broadcast clock 8.0."
+        },
+        {
+          "videoSeconds": 26.313,
+          "observed": "Sector 1 graphic 24.013, matching the OpenF1 pole-lap sector exactly."
+        },
+        {
+          "videoSeconds": 50,
+          "observed": "Running broadcast clock 48.0."
+        },
+        {
+          "videoSeconds": 99.064,
+          "observed": "Final broadcast lap result 1:32.064, matching the OpenF1 pole lap."
+        }
+      ],
+      "offsetNote": "Frame-checked against the running broadcast clock, exact sector timing, and lap completion. Broadcast clock displays tenths; estimated alignment uncertainty is ±0.15 s. User trim remains available.",
+      "estimatedUncertaintySeconds": 0.15,
+      "sourceDurationSeconds": 113.707,
+      "publishedAtUtc": "2026-03-14T09:50:00.782Z"
+    },
+    "japan": {
+      "videoId": "1860901063346183466",
+      "officialPageUrl": "https://www.formula1.com/en/video/kimi-antonellis-2026-pirelli-pole-position-award-lap-at-the-japanese-grand-prix.1860901063346183466",
+      "title": "Kimi Antonelli’s 2026 Pirelli Pole Position Award lap at the Japanese Grand Prix",
+      "driverName": "Kimi Antonelli",
+      "lapDurationSeconds": 88.778,
+      "catalogLapDurationSeconds": 89.362,
+      "lapStartSeconds": 2,
+      "syncStatus": "verified",
+      "syncEvidence": [
+        {
+          "videoSeconds": 2,
+          "observed": "Broadcast clock 0.0 at the start of the timed lap; driver graphic and track checked."
+        },
+        {
+          "videoSeconds": 10,
+          "observed": "Running broadcast clock 8.0."
+        },
+        {
+          "videoSeconds": 34.155,
+          "observed": "Sector 1 graphic 31.855, matching the OpenF1 pole-lap sector exactly."
+        },
+        {
+          "videoSeconds": 50,
+          "observed": "Running broadcast clock 48.0."
+        },
+        {
+          "videoSeconds": 90.778,
+          "observed": "Broadcast clock 1:28.7 as Antonelli crosses the finish line in the external camera view."
+        },
+        {
+          "videoSeconds": 94.362,
+          "observed": "Final broadcast lap result 1:28.778, matching OpenF1 and the official qualifying classification."
+        },
+        {
+          "sourceUrl": "https://www.formula1.com/en/results/2026/races/1281/japan/qualifying",
+          "observed": "Official classification confirms Antonelli P1 Q3 1:28.778. The video-page description incorrectly lists 1:29.362; it is not used as the replay duration."
+        }
+      ],
+      "offsetNote": "Frame-checked against the running broadcast clock, exact sector timing, and lap completion. Broadcast clock displays tenths; estimated alignment uncertainty is ±0.15 s. User trim remains available. Official video description lists 1:29.362 incorrectly; official qualifying results, OpenF1 and the broadcast finish agree on 1:28.778.",
+      "estimatedUncertaintySeconds": 0.15,
+      "sourceDurationSeconds": 109.013,
+      "publishedAtUtc": "2026-03-28T10:31:58.503Z"
+    },
+    "miami": {
+      "videoId": "1864117668892143324",
+      "officialPageUrl": "https://www.formula1.com/en/video/onboard-antonellis-2026-pirelli-pole-position-award-lap-at-the-miami-grand-prix.1864117668892143324",
+      "title": "ONBOARD: Antonelli’s 2026 Pirelli Pole Position Award lap at the Miami Grand Prix",
+      "driverName": "Kimi Antonelli",
+      "lapDurationSeconds": 87.798,
+      "catalogLapDurationSeconds": 87.798,
+      "lapStartSeconds": 2.6,
+      "syncStatus": "verified",
+      "syncEvidence": [
+        {
+          "videoSeconds": 2.6,
+          "observed": "Broadcast clock 0.0 at the start of the timed lap; driver graphic and track checked."
+        },
+        {
+          "videoSeconds": 10,
+          "observed": "Running broadcast clock 7.4."
+        },
+        {
+          "videoSeconds": 32.643,
+          "observed": "Sector 1 graphic 29.743, matching the OpenF1 pole-lap sector exactly."
+        },
+        {
+          "videoSeconds": 50,
+          "observed": "Running broadcast clock 47.4."
+        },
+        {
+          "videoSeconds": 93.898,
+          "observed": "Final broadcast lap result 1:27.798, matching the OpenF1 pole lap."
+        }
+      ],
+      "offsetNote": "Frame-checked against the running broadcast clock, exact sector timing, and lap completion. Broadcast clock displays tenths; estimated alignment uncertainty is ±0.15 s. User trim remains available.",
+      "estimatedUncertaintySeconds": 0.15,
+      "sourceDurationSeconds": 108.309,
+      "publishedAtUtc": "2026-05-02T22:40:20.778Z"
+    },
+    "canada": {
+      "videoId": "1866020772708445814",
+      "officialPageUrl": "https://www.formula1.com/en/video/onboard-russells-2026-pirelli-pole-position-award-lap-at-the-canadian-grand-prix.1866020772708445814",
+      "title": "ONBOARD: Russell’s 2026 Pirelli Pole Position Award lap at the Canadian Grand Prix",
+      "driverName": "George Russell",
+      "lapDurationSeconds": 72.578,
+      "catalogLapDurationSeconds": 72.578,
+      "lapStartSeconds": 2,
+      "syncStatus": "verified",
+      "syncEvidence": [
+        {
+          "videoSeconds": 2,
+          "observed": "Broadcast clock 0.0 at the start of the timed lap; driver graphic and track checked."
+        },
+        {
+          "videoSeconds": 10,
+          "observed": "Running broadcast clock 8.0."
+        },
+        {
+          "videoSeconds": 22.9,
+          "observed": "Sector 1 graphic 20.600, matching the OpenF1 pole-lap sector exactly."
+        },
+        {
+          "videoSeconds": 50,
+          "observed": "Running broadcast clock 48.0."
+        },
+        {
+          "videoSeconds": 79.578,
+          "observed": "Final broadcast lap result 1:12.578, matching the OpenF1 pole lap."
+        }
+      ],
+      "offsetNote": "Frame-checked against the running broadcast clock, exact sector timing, and lap completion. Broadcast clock displays tenths; estimated alignment uncertainty is ±0.15 s. User trim remains available.",
+      "estimatedUncertaintySeconds": 0.15,
+      "sourceDurationSeconds": 93.483,
+      "publishedAtUtc": "2026-05-23T23:05:26.433Z"
+    },
+    "monaco": {
+      "videoId": "1867267248475254745",
+      "officialPageUrl": "https://www.formula1.com/en/video/onboard-kimi-antonellis-2026-pirelli-pole-position-award-lap-at-the-monaco-grand-prix.1867267248475254745",
+      "title": "ONBOARD: Kimi Antonelli’s 2026 Pirelli Pole Position Award lap at the Monaco Grand Prix",
+      "driverName": "Kimi Antonelli",
+      "lapDurationSeconds": 72.051,
+      "catalogLapDurationSeconds": 72.051,
+      "lapStartSeconds": 2,
+      "syncStatus": "verified",
+      "syncEvidence": [
+        {
+          "videoSeconds": 2,
+          "observed": "Broadcast clock 0.0 at the start of the timed lap; driver graphic and track checked."
+        },
+        {
+          "videoSeconds": 10,
+          "observed": "Running broadcast clock 8.0."
+        },
+        {
+          "videoSeconds": 21.234,
+          "observed": "Sector 1 graphic 18.934, matching the OpenF1 pole-lap sector exactly."
+        },
+        {
+          "videoSeconds": 50,
+          "observed": "Running broadcast clock 48.0."
+        },
+        {
+          "videoSeconds": 79.051,
+          "observed": "Final broadcast lap result 1:12.051, matching the OpenF1 pole lap."
+        }
+      ],
+      "offsetNote": "Frame-checked against the running broadcast clock, exact sector timing, and lap completion. Broadcast clock displays tenths; estimated alignment uncertainty is ±0.15 s. User trim remains available.",
+      "estimatedUncertaintySeconds": 0.15,
+      "sourceDurationSeconds": 92.053,
+      "publishedAtUtc": "2026-06-06T17:15:46.893Z"
+    },
+    "barcelona-catalunya": {
+      "videoId": "1867898001327304329",
+      "officialPageUrl": "https://www.formula1.com/en/video/onboard-russells-2026-pirelli-pole-position-award-lap-at-the-barcelona-catalunya-gp.1867898001327304329",
+      "title": "ONBOARD: Russell’s 2026 Pirelli Pole Position Award lap at the Barcelona-Catalunya GP",
+      "driverName": "George Russell",
+      "lapDurationSeconds": 74.679,
+      "catalogLapDurationSeconds": 74.679,
+      "lapStartSeconds": 2,
+      "syncStatus": "verified",
+      "syncEvidence": [
+        {
+          "videoSeconds": 2,
+          "observed": "Broadcast clock 0.0 at the start of the timed lap; driver graphic and track checked."
+        },
+        {
+          "videoSeconds": 10,
+          "observed": "Running broadcast clock 8.0."
+        },
+        {
+          "videoSeconds": 24.149,
+          "observed": "Sector 1 graphic 21.849, matching the OpenF1 pole-lap sector exactly."
+        },
+        {
+          "videoSeconds": 50,
+          "observed": "Running broadcast clock 48.0."
+        },
+        {
+          "videoSeconds": 76.379,
+          "observed": "Running broadcast clock 1:14.3 approaching the timing line."
+        },
+        {
+          "videoSeconds": 77.679,
+          "observed": "Sector 3 graphic 22.715; S1 21.849 + S2 30.115 + S3 22.715 = 1:14.679. Outro starts before the full lap-result graphic."
+        }
+      ],
+      "offsetNote": "Frame-checked against the running broadcast clock, exact sector timing, and lap completion. Broadcast clock displays tenths; estimated alignment uncertainty is ±0.15 s. User trim remains available.",
+      "estimatedUncertaintySeconds": 0.15,
+      "sourceDurationSeconds": 91.307,
+      "publishedAtUtc": "2026-06-13T16:44:58.868Z"
+    },
+    "austria": {
+      "videoId": "1869171069828990729",
+      "officialPageUrl": "https://www.formula1.com/en/video/onboard-russells-2026-pirelli-pole-position-award-lap-at-the-austrian-gp.1869171069828990729",
+      "title": "ONBOARD: Russell’s 2026 Pirelli Pole Position Award lap at the Austrian GP",
+      "driverName": "George Russell",
+      "lapDurationSeconds": 66.113,
+      "catalogLapDurationSeconds": 66.113,
+      "lapStartSeconds": 2,
+      "syncStatus": "verified",
+      "syncEvidence": [
+        {
+          "videoSeconds": 2,
+          "observed": "Broadcast clock 0.0 at the start of the timed lap; driver graphic and track checked."
+        },
+        {
+          "videoSeconds": 10,
+          "observed": "Running broadcast clock 8.0."
+        },
+        {
+          "videoSeconds": 18.724,
+          "observed": "Sector 1 graphic 16.424, matching the OpenF1 pole-lap sector exactly."
+        },
+        {
+          "videoSeconds": 50,
+          "observed": "Sector 2 graphic 29.620, matching the OpenF1 pole-lap sector exactly."
+        },
+        {
+          "videoSeconds": 71.613,
+          "observed": "Final broadcast lap result 1:06.113, matching the OpenF1 pole lap."
+        }
+      ],
+      "offsetNote": "Frame-checked against the running broadcast clock, exact sector timing, and lap completion. Broadcast clock displays tenths; estimated alignment uncertainty is ±0.15 s. User trim remains available.",
+      "estimatedUncertaintySeconds": 0.15,
+      "sourceDurationSeconds": 85.568,
+      "publishedAtUtc": "2026-06-27T17:23:10.053Z"
+    },
+    "great-britain": {
+      "videoId": "1869806515587856271",
+      "officialPageUrl": "https://www.formula1.com/en/video/onboard-antonellis-2026-pirelli-pole-position-award-lap-at-the-british-gp.1869806515587856271",
+      "title": "ONBOARD: Antonelli’s 2026 Pirelli Pole Position Award lap at the British GP",
+      "driverName": "Kimi Antonelli",
+      "lapDurationSeconds": 88.111,
+      "catalogLapDurationSeconds": 88.111,
+      "lapStartSeconds": 2,
+      "syncStatus": "verified",
+      "syncEvidence": [
+        {
+          "videoSeconds": 2,
+          "observed": "Broadcast clock 0.0 at the start of the timed lap; driver graphic and track checked."
+        },
+        {
+          "videoSeconds": 10,
+          "observed": "Running broadcast clock 8.0."
+        },
+        {
+          "videoSeconds": 30.648,
+          "observed": "Sector 1 graphic 28.348, matching the OpenF1 pole-lap sector exactly."
+        },
+        {
+          "videoSeconds": 50,
+          "observed": "Running broadcast clock 48.0."
+        },
+        {
+          "videoSeconds": 93.611,
+          "observed": "Final broadcast lap result 1:28.111, matching the OpenF1 pole lap."
+        }
+      ],
+      "offsetNote": "Frame-checked against the running broadcast clock, exact sector timing, and lap completion. Broadcast clock displays tenths; estimated alignment uncertainty is ±0.15 s. User trim remains available.",
+      "estimatedUncertaintySeconds": 0.15,
+      "sourceDurationSeconds": 107.819,
+      "publishedAtUtc": "2026-07-04T17:36:26.044Z"
+    },
+    "belgium": {
+      "videoId": "1871072704503221397",
+      "officialPageUrl": "https://www.formula1.com/en/video/onboard-antonellis-2026-pirelli-pole-position-award-lap-at-the-belgian-gp.1871072704503221397",
+      "title": "ONBOARD: Antonelli’s 2026 Pirelli Pole Position Award lap at the Belgian GP",
+      "driverName": "Kimi Antonelli",
+      "lapDurationSeconds": 104.361,
+      "catalogLapDurationSeconds": 104.36099999999999,
+      "lapStartSeconds": 2,
+      "syncStatus": "verified",
+      "syncEvidence": [
+        {
+          "videoSeconds": 2,
+          "observed": "Broadcast clock 0.0 at the start of the timed lap; driver graphic and track checked."
+        },
+        {
+          "videoSeconds": 10,
+          "observed": "Running broadcast clock 8.0."
+        },
+        {
+          "videoSeconds": 32.46,
+          "observed": "Sector 1 graphic 30.160, matching the OpenF1 pole-lap sector exactly."
+        },
+        {
+          "videoSeconds": 50,
+          "observed": "Running broadcast clock 48.0."
+        },
+        {
+          "videoSeconds": 111.361,
+          "observed": "Final broadcast lap result 1:44.361, matching the OpenF1 pole lap."
+        }
+      ],
+      "offsetNote": "Frame-checked against the running broadcast clock, exact sector timing, and lap completion. Broadcast clock displays tenths; estimated alignment uncertainty is ±0.15 s. User trim remains available.",
+      "estimatedUncertaintySeconds": 0.15,
+      "sourceDurationSeconds": 127.552,
+      "publishedAtUtc": "2026-07-18T17:27:20.382Z"
+    },
+    "hungary": {
+      "videoId": "1871708350996459213",
+      "officialPageUrl": "https://www.formula1.com/en/video/onboard-norris-2026-pirelli-pole-position-award-lap-at-the-hungarian-gp.1871708350996459213",
+      "title": "ONBOARD: Norris' 2026 Pirelli Pole Position Award lap at the Hungarian GP",
+      "driverName": "Lando Norris",
+      "lapDurationSeconds": 77.207,
+      "catalogLapDurationSeconds": 77.207,
+      "lapStartSeconds": 2,
+      "syncStatus": "verified",
+      "syncEvidence": [
+        {
+          "videoSeconds": 2,
+          "observed": "Broadcast clock 0.0 at the start of the timed lap; driver graphic and track checked."
+        },
+        {
+          "videoSeconds": 10,
+          "observed": "Running broadcast clock 8.0."
+        },
+        {
+          "videoSeconds": 29.664,
+          "observed": "Sector 1 graphic 27.364, matching the OpenF1 pole-lap sector exactly."
+        },
+        {
+          "videoSeconds": 50,
+          "observed": "Running broadcast clock 48.0."
+        },
+        {
+          "videoSeconds": 82.707,
+          "observed": "Final broadcast lap result 1:17.207, matching the OpenF1 pole lap."
+        }
+      ],
+      "offsetNote": "Frame-checked against the running broadcast clock, exact sector timing, and lap completion. Broadcast clock displays tenths; estimated alignment uncertainty is ±0.15 s. User trim remains available.",
+      "estimatedUncertaintySeconds": 0.15,
+      "sourceDurationSeconds": 98.987,
+      "publishedAtUtc": "2026-07-26T13:02:05.566Z"
+    },
+    "netherlands": {
+      "videoId": "1874240800105399822",
+      "officialPageUrl": "https://www.formula1.com/en/video/onboard-norris-2026-pirelli-pole-position-award-lap-at-the-dutch-grand-prix.1874240800105399822",
+      "title": "ONBOARD: Norris’ 2026 Pirelli Pole Position Award lap at the Dutch Grand Prix",
+      "driverName": "Lando Norris",
+      "lapDurationSeconds": 71.163,
+      "catalogLapDurationSeconds": 71.163,
+      "lapStartSeconds": 2,
+      "syncStatus": "verified",
+      "syncEvidence": [
+        {
+          "videoSeconds": 2,
+          "observed": "Broadcast clock 0.0 at the start of the timed lap; driver graphic and track checked."
+        },
+        {
+          "videoSeconds": 10,
+          "observed": "Running broadcast clock 8.0."
+        },
+        {
+          "videoSeconds": 26.756,
+          "observed": "Sector 1 graphic 24.456, matching the OpenF1 pole-lap sector exactly."
+        },
+        {
+          "videoSeconds": 50,
+          "observed": "Running broadcast clock 48.0."
+        },
+        {
+          "videoSeconds": 78.163,
+          "observed": "Final broadcast lap result 1:11.163, matching the OpenF1 pole lap."
+        }
+      ],
+      "offsetNote": "Frame-checked against the running broadcast clock, exact sector timing, and lap completion. Broadcast clock displays tenths; estimated alignment uncertainty is ±0.15 s. User trim remains available.",
+      "estimatedUncertaintySeconds": 0.15,
+      "sourceDurationSeconds": 94.464,
+      "publishedAtUtc": "2026-08-22T16:29:18.420Z"
+    },
+    "italy": {
+      "videoId": "1875512176880711836",
+      "officialPageUrl": "https://www.formula1.com/en/video/onboard-pierre-gaslys-2026-pirelli-pole-position-award-lap-at-the-italian-grand-prix.1875512176880711836",
+      "title": "ONBOARD: Pierre Gasly’s 2026 Pirelli Pole Position Award lap at the Italian Grand Prix",
+      "driverName": "Pierre Gasly",
+      "lapDurationSeconds": 81.786,
+      "catalogLapDurationSeconds": 81.786,
+      "lapStartSeconds": 2,
+      "syncStatus": "verified",
+      "syncEvidence": [
+        {
+          "videoSeconds": 2,
+          "observed": "Broadcast clock 0.0 at the start of the timed lap; driver graphic and track checked."
+        },
+        {
+          "videoSeconds": 10,
+          "observed": "Running broadcast clock 8.0."
+        },
+        {
+          "videoSeconds": 29.117,
+          "observed": "Sector 1 graphic 26.817, matching the OpenF1 pole-lap sector exactly."
+        },
+        {
+          "videoSeconds": 50,
+          "observed": "Running broadcast clock 48.0."
+        },
+        {
+          "videoSeconds": 88.786,
+          "observed": "Final broadcast lap result 1:21.786, matching the OpenF1 pole lap."
+        }
+      ],
+      "offsetNote": "Frame-checked against the running broadcast clock, exact sector timing, and lap completion. Broadcast clock displays tenths; estimated alignment uncertainty is ±0.15 s. User trim remains available.",
+      "estimatedUncertaintySeconds": 0.15,
+      "sourceDurationSeconds": 106.027,
+      "publishedAtUtc": "2026-09-05T17:25:06.774Z"
+    },
+    "spain": {
+      "videoId": "1876144464772606408",
+      "officialPageUrl": "https://www.formula1.com/en/video/onboard-norris-2026-pirelli-pole-position-award-lap-at-the-spanish-grand-prix.1876144464772606408",
+      "title": "ONBOARD: Norris’ 2026 Pirelli Pole Position Award lap at the Spanish Grand Prix",
+      "driverName": "Lando Norris",
+      "lapDurationSeconds": 91.824,
+      "catalogLapDurationSeconds": 91.824,
+      "lapStartSeconds": 2.2,
+      "syncStatus": "verified",
+      "syncEvidence": [
+        {
+          "videoSeconds": 2.2,
+          "observed": "Broadcast clock 0.0 at the start of the timed lap; driver graphic and track checked."
+        },
+        {
+          "videoSeconds": 10,
+          "observed": "Running broadcast clock 7.8."
+        },
+        {
+          "videoSeconds": 30.726,
+          "observed": "Sector 1 graphic 28.226, matching the OpenF1 pole-lap sector exactly."
+        },
+        {
+          "videoSeconds": 50,
+          "observed": "Running broadcast clock 47.8."
+        },
+        {
+          "videoSeconds": 99.024,
+          "observed": "Final broadcast lap result 1:31.824, matching the OpenF1 pole lap."
+        }
+      ],
+      "offsetNote": "Frame-checked against the running broadcast clock, exact sector timing, and lap completion. Broadcast clock displays tenths; estimated alignment uncertainty is ±0.15 s. User trim remains available.",
+      "estimatedUncertaintySeconds": 0.15,
+      "sourceDurationSeconds": 120.235,
+      "publishedAtUtc": "2026-09-12T16:59:12.958Z"
+    },
+    "azerbaijan": {
+      "videoId": "1877319879240517642",
+      "officialPageUrl": "https://www.formula1.com/en/video/onboard-russells-2026-pirelli-pole-position-award-lap-at-the-azerbaijan-grand-prix.1877319879240517642",
+      "title": "ONBOARD: Russell’s 2026 Pirelli Pole Position Award lap at the Azerbaijan Grand Prix",
+      "driverName": "George Russell",
+      "lapDurationSeconds": 102.526,
+      "catalogLapDurationSeconds": 102.52600000000001,
+      "lapStartSeconds": 2.1,
+      "syncStatus": "verified",
+      "syncEvidence": [
+        {
+          "videoSeconds": 2.1,
+          "observed": "Broadcast clock 0.0 at the start of the timed lap; driver graphic and track checked."
+        },
+        {
+          "videoSeconds": 10,
+          "observed": "Running broadcast clock 7.9."
+        },
+        {
+          "videoSeconds": 38.409,
+          "observed": "Sector 1 graphic 36.009, matching the OpenF1 pole-lap sector exactly."
+        },
+        {
+          "videoSeconds": 50,
+          "observed": "Running broadcast clock 47.8."
+        },
+        {
+          "videoSeconds": 108.126,
+          "observed": "Final broadcast lap result 1:42.526, matching the OpenF1 pole lap."
+        }
+      ],
+      "offsetNote": "Frame-checked against the running broadcast clock, exact sector timing, and lap completion. Broadcast clock displays tenths; estimated alignment uncertainty is ±0.15 s. User trim remains available.",
+      "estimatedUncertaintySeconds": 0.15,
+      "sourceDurationSeconds": 124.181,
+      "publishedAtUtc": "2026-09-25T16:30:06.458Z"
+    },
+    "bahrain": {
+      "videoId": "1878026931852054904",
+      "officialPageUrl": "https://www.formula1.com/en/video/onboard-verstappens-2026-pirelli-pole-position-award-lap-at-the-bahrain-grand-prix.1878026931852054904",
+      "title": "ONBOARD: Verstappen’s 2026 Pirelli Pole Position Award lap at the Bahrain Grand Prix",
+      "driverName": "Max Verstappen",
+      "lapDurationSeconds": 95.13,
+      "catalogLapDurationSeconds": 95.13,
+      "lapStartSeconds": 2.1,
+      "syncStatus": "verified",
+      "syncEvidence": [
+        {
+          "videoSeconds": 2.1,
+          "observed": "Broadcast clock 0.0 at the start of the timed lap; driver graphic and track checked."
+        },
+        {
+          "videoSeconds": 10,
+          "observed": "Running broadcast clock 7.9."
+        },
+        {
+          "videoSeconds": 27.009,
+          "observed": "Sector 1 graphic 24.609, matching the OpenF1 pole-lap sector exactly."
+        },
+        {
+          "videoSeconds": 50,
+          "observed": "Running broadcast clock 47.8."
+        },
+        {
+          "videoSeconds": 102.23,
+          "observed": "Final broadcast lap result 1:35.130, matching the OpenF1 pole lap."
+        }
+      ],
+      "offsetNote": "Frame-checked against the running broadcast clock, exact sector timing, and lap completion. Broadcast clock displays tenths; estimated alignment uncertainty is ±0.15 s. User trim remains available.",
+      "estimatedUncertaintySeconds": 0.15,
+      "sourceDurationSeconds": 116.437,
+      "publishedAtUtc": "2026-10-03T11:25:26.480Z"
+    },
+    "singapore": {
+      "videoId": "1878677458343183007",
+      "officialPageUrl": "https://www.formula1.com/en/video/onboard-max-verstappens-2026-pirelli-pole-position-award-lap-at-the-singapore-grand-prix.1878677458343183007",
+      "title": "ONBOARD: Max Verstappen’s 2026 Pirelli Pole Position Award lap at the Singapore Grand Prix",
+      "driverName": "Max Verstappen",
+      "lapDurationSeconds": 91.373,
+      "catalogLapDurationSeconds": 91.373,
+      "lapStartSeconds": 2.1,
+      "syncStatus": "verified",
+      "syncEvidence": [
+        {
+          "videoSeconds": 2.1,
+          "observed": "Clock 0.0; car crosses the timing stripe."
+        },
+        {
+          "videoSeconds": 10,
+          "observed": "Clock 7.9."
+        },
+        {
+          "videoSeconds": 29.1,
+          "observed": "Clock 27.0 at sector 1 boundary; OpenF1 S1 is 27.002."
+        },
+        {
+          "videoSeconds": 93.48,
+          "observed": "Clock 1:31.3; the same timing stripe crosses beneath the car, consistent with 91.373-second lap."
+        }
+      ],
+      "offsetNote": "Broadcast timer resolution is 0.1s; this is an initial visual alignment, with user trim supported by the player.",
+      "estimatedUncertaintySeconds": 0.1,
+      "sourceDurationSeconds": 113.941,
+      "publishedAtUtc": "2026-10-10T16:13:08.139Z"
+    },
+    "united-states": {
+      "videoId": null,
+      "officialPageUrl": null,
+      "title": null,
+      "driverName": null,
+      "lapStartSeconds": null,
+      "syncStatus": "unavailable",
+      "syncEvidence": [],
+      "offsetNote": "Awaiting 2026 qualifying and the official pole-lap onboard."
+    },
+    "mexico": {
+      "videoId": null,
+      "officialPageUrl": null,
+      "title": null,
+      "driverName": null,
+      "lapStartSeconds": null,
+      "syncStatus": "unavailable",
+      "syncEvidence": [],
+      "offsetNote": "Awaiting 2026 qualifying and the official pole-lap onboard."
+    },
+    "brazil": {
+      "videoId": null,
+      "officialPageUrl": null,
+      "title": null,
+      "driverName": null,
+      "lapStartSeconds": null,
+      "syncStatus": "unavailable",
+      "syncEvidence": [],
+      "offsetNote": "Awaiting 2026 qualifying and the official pole-lap onboard."
+    },
+    "las-vegas": {
+      "videoId": null,
+      "officialPageUrl": null,
+      "title": null,
+      "driverName": null,
+      "lapStartSeconds": null,
+      "syncStatus": "unavailable",
+      "syncEvidence": [],
+      "offsetNote": "Awaiting 2026 qualifying and the official pole-lap onboard."
+    },
+    "qatar": {
+      "videoId": null,
+      "officialPageUrl": null,
+      "title": null,
+      "driverName": null,
+      "lapStartSeconds": null,
+      "syncStatus": "unavailable",
+      "syncEvidence": [],
+      "offsetNote": "Awaiting 2026 qualifying and the official pole-lap onboard."
+    },
+    "abu-dhabi": {
+      "videoId": null,
+      "officialPageUrl": null,
+      "title": null,
+      "driverName": null,
+      "lapStartSeconds": null,
+      "syncStatus": "unavailable",
+      "syncEvidence": [],
+      "offsetNote": "Awaiting 2026 qualifying and the official pole-lap onboard."
+    }
+  }
+}

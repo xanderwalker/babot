@@ -90,7 +90,7 @@ try {
   await page.getByRole('button', { name: 'Run +pitch · 1°', exact: true }).click();
   await page.locator('.axis-calibration-check').nth(1).getByRole('combobox').selectOption('nose-down');
   await page.getByRole('button', { name: 'Verify mounting', exact: true }).click();
-  await page.getByRole('heading', { name: 'Ready for the Singapore lap.' }).waitFor();
+  await page.getByRole('heading', { name: 'Ready for the lap.' }).waitFor();
   const calibrated = await snapshot(page);
   assert.equal(calibrated.savedMounting.mounting.verified, true);
   assert.equal(calibrated.motion.filter(line => line.startsWith('ARM ')).length, 2, 'Each explicit axis pulse must ARM exactly once');

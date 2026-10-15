@@ -1,0 +1,13 @@
+.season-library{padding:24px 0 20px;border-bottom:1px solid var(--line)}
+.season-heading{display:flex;align-items:center;justify-content:space-between;gap:18px;margin-bottom:17px}
+.season-heading h2{font:500 28px 'Barlow Condensed',sans-serif;margin:5px 0 0}
+.season-count{font:10px 'IBM Plex Mono',monospace;color:var(--orange);white-space:nowrap}.season-count span{color:var(--muted)}
+.race-select{display:flex;gap:14px;align-items:center;color:var(--muted);font-size:12px}.race-select select{min-width:320px;max-width:100%;padding:11px 13px;color:var(--mint);font-size:13px}.race-select>span{font-size:11px}
+.season-calendar{margin-top:16px}.season-calendar summary{cursor:pointer;list-style:none;display:inline-flex;gap:16px;font-size:11px;color:var(--muted)}.season-calendar summary:hover{color:var(--mint)}
+.race-grid{margin-top:15px;display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:8px}
+.race-card{text-align:left;padding:13px;display:flex;flex-direction:column;gap:9px;min-height:100px;border-radius:2px}.race-card.selected{border-color:var(--orange);background:#2a241e}
+.race-round{font:11px 'IBM Plex Mono',monospace;color:var(--orange);display:flex;justify-content:space-between;gap:6px}.race-round small{font-size:9px;color:var(--muted);text-transform:uppercase}.race-card strong{font-size:14px;font-weight:500}.race-card>span:last-child{font-size:10px;line-height:1.4;color:var(--muted)}.race-card:disabled{opacity:.55}
+.season-error{color:#edca91;font-size:12px;line-height:1.5;margin:14px 0 0}.blender-ribbon .ribbon-render-status{pointer-events:none}.intro h1{font-size:clamp(42px,5vw,72px)}
+@media(max-width:1100px){.race-grid{grid-template-columns:repeat(4,minmax(0,1fr))}.race-select{flex-wrap:wrap}.race-select>span{flex-basis:100%}}
+@media(max-width:650px){.season-heading{align-items:flex-start}.season-heading h2{font-size:24px}.season-count{font-size:8px;padding-top:4px}.season-count span{display:block;margin-top:6px}.race-select{display:block}.race-select select{display:block;min-width:0;width:100%;margin:8px 0}.race-select>span{font-size:10px}.race-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.season-library{padding-top:20px}.intro{gap:15px}.driver h2{font-size:19px}}
+.coverage-note{font-size:11px;color:#c4b99d;line-height:1.5;margin:0 0 14px}

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent } from 'react';
-import fixture from '../data/openf1-singapore-2026-verstappen-pole.json';
+import singaporeFixture from '../data/openf1-singapore-2026-verstappen-pole.json';
 import { buildSingaporeBabotMotionSeries, createSingaporePlaybackMotionSampler } from './motion.mjs';
 import { carPoseToFirmwarePose, commandedPoseDegrees, isApprovedControllerOrigin } from './protocol.mjs';
 import { BabotSerial, type BabotPose } from './babot-serial';
@@ -10,26 +10,37 @@ import { AxisCalibrationPanel, type CalibrationAxis, type MountingCalibration } 
 import { CHASSIS_LIMITS, DEFAULT_MOTION_STRENGTH, motionAmplitudes, readMountingCalibration, saveMountingCalibration } from './motion-settings.mjs';
 import { ConceptChassis, ChassisGallery } from './ConceptChassis';
 import { BlenderRibbon } from './BlenderRibbon';
-import { loadOfficialMedia } from './media-source';
+import { loadOfficialMedia, SINGAPORE_MEDIA, type EventMedia } from './media-source';
+import { assetUrl } from './asset-url';
+import { ReplayLoader, settleReplaySwitch } from './replay-library.mjs';
+import { SeasonLibrary, type SeasonEvent } from './SeasonLibrary';
 import { channelsAt, canSendMotion, clamp, distanceAt, distanceSeries, lapTime, videoTime, windowFits } from './player-clock.mjs';
 
-const model = buildSingaporeBabotMotionSeries(fixture);
-const carSamples: number[][] = fixture.carSamples.map(row => row.map(value => value ?? 0));
-const distance = distanceSeries(carSamples);
-const lap = fixture.meta;
-const duration = lap.lapDurationSeconds;
-const playbackMotionAt = createSingaporePlaybackMotionSampler(model, { durationSeconds: duration });
 const clock = (seconds:number) => `${Math.floor(Math.max(0,seconds)/60)}:${(Math.max(0,seconds)%60).toFixed(3).padStart(6,'0')}`;
-type Media = { url: string; poster?: string; lapStartSeconds?: number; title?: string; sourceUrl?: string; offsetNote?: string };
-const officialVideo = 'https://www.formula1.com/en/video/onboard-max-verstappens-2026-pirelli-pole-position-award-lap-at-the-singapore-grand-prix.1878677458343183007';
-const trackBounds = fixture.locationSamples.reduce((a,r)=>[Math.min(a[0],r[1]),Math.max(a[1],r[1]),Math.min(a[2],r[2]),Math.max(a[3],r[2])],[Infinity,-Infinity,Infinity,-Infinity]);
-const project = (x:number,y:number) => [12+((x-trackBounds[0])/(trackBounds[1]-trackBounds[0]))*176, 106-((y-trackBounds[2])/(trackBounds[3]-trackBounds[2]))*94];
-const trackPath = fixture.locationSamples.filter((_,i)=>i%2===0).map((r,i)=>`${i?'L':'M'}${project(r[1],r[2]).join(',')}`).join(' ');
+type Fixture = typeof singaporeFixture;
+type Media = { url: string; poster?: string; lapStartSeconds?: number; title?: string; sourceUrl?: string; offsetNote?: string; syncVerified?: boolean };
+const initialEvent:SeasonEvent={id:'singapore',round:17,meetingKey:1296,name:'Singapore Grand Prix',circuit:'Marina Bay',country:'Singapore',date:singaporeFixture.meta.lapStartUtc,status:'available',driverName:'Max Verstappen',lapDurationSeconds:91.373,fixtureUrl:'./data/openf1-singapore-2026-verstappen-pole.json'};
 
 function PlayIcon({playing=false}:{playing?:boolean}) { return <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor" aria-hidden="true">{playing?<path d="M6 4h4v16H6zm8 0h4v16h-4z"/>:<path d="M7 3l15 9-15 9z"/>}</svg>; }
 function Metric({label,value,unit,tone=''}:{label:string,value:string,unit?:string,tone?:string}) { return <div className={`metric ${tone}`}><span>{label}</span><div>{value}<small>{unit}</small></div></div>; }
 
 export default function App({ setupMode = false }: { setupMode?: boolean }) {
+  const [replay,setReplay]=useState<{event:SeasonEvent;fixture:Fixture}>({event:initialEvent,fixture:singaporeFixture});
+  const [events,setEvents]=useState<SeasonEvent[]>([initialEvent]);
+  const [switching,setSwitching]=useState(false);
+  const [libraryError,setLibraryError]=useState('');
+  const loader=useRef(new ReplayLoader());
+  const switchGeneration=useRef(0);
+  const fixture=replay.fixture;
+  const lap=fixture.meta, duration=lap.lapDurationSeconds;
+  const model=useMemo(()=>buildSingaporeBabotMotionSeries(fixture),[fixture]);
+  const carSamples=useMemo(()=>fixture.carSamples.map(row=>row.map(value=>value??0)),[fixture]);
+  const distance=useMemo(()=>distanceSeries(carSamples),[carSamples]);
+  const playbackMotionAt=useMemo(()=>createSingaporePlaybackMotionSampler(model,{durationSeconds:duration}),[model,duration]);
+  const trackBounds=useMemo(()=>fixture.locationSamples.reduce((a,r)=>[Math.min(a[0],r[1]),Math.max(a[1],r[1]),Math.min(a[2],r[2]),Math.max(a[3],r[2])],[Infinity,-Infinity,Infinity,-Infinity]),[fixture]);
+  const project=(x:number,y:number)=>[12+((x-trackBounds[0])/Math.max(1,trackBounds[1]-trackBounds[0]))*176,106-((y-trackBounds[2])/Math.max(1,trackBounds[3]-trackBounds[2]))*94];
+  const trackPath=useMemo(()=>fixture.locationSamples.filter((_,i)=>i%2===0).map((r,i)=>`${i?'L':'M'}${project(r[1],r[2]).join(',')}`).join(' '),[fixture,trackBounds]);
+
   const video = useRef<HTMLVideoElement>(null);
   const serial = useRef<BabotSerial|null>(null);
   const connection = useRef<ConnectionManager|null>(null);
@@ -44,6 +55,8 @@ export default function App({ setupMode = false }: { setupMode?: boolean }) {
   const latest = useRef<any>({});
   const userSelectedSource = useRef(false);
   const [media,setMedia]=useState<Media|null>(null);
+  const officialVideo=media?.sourceUrl||String(fixture.provenance.sourceUrls.officialOnboard||'https://www.formula1.com/en/video');
+  const [renderedRibbonId,setRenderedRibbonId]=useState('');
   const [source,setSource]=useState('');
   const [sourceLabel,setSourceLabel]=useState('Official F1 onboard');
   const [offset,setOffset]=useState(0);
@@ -86,13 +99,13 @@ export default function App({ setupMode = false }: { setupMode?: boolean }) {
   const canConnectHere = isApprovedControllerOrigin({isSecureContext:window.isSecureContext,isTopLevel:window.top===window.self});
   const hasSerial = 'serial' in navigator && canConnectHere;
   const usbHint = !canConnectHere ? 'Open directly in an HTTPS browser tab' : !('serial' in navigator) ? 'Use desktop Chrome or Edge for USB' : 'USB · 115200 baud · 50 Hz';
-  latest.current={time,offset,videoMode,playing,ready,confirmed,amplitudes,strength,mounting,fits,flexDemo};
+  latest.current={time,offset,videoMode,playing,ready,confirmed,amplitudes,strength,mounting,fits,flexDemo,switching};
 
   currentPose.current=()=>{
     const s=latest.current, el=video.current;
     const elapsed=lapTime(frame.current.time,s.offset,duration);
     const motion=playbackMotionAt(elapsed);
-    if(!el||!ownsController.current||calibrationRun.current||!s.mounting.verified||s.strength<=0||s.flexDemo||!s.fits||!canSendMotion({playing:!el.paused,videoMode:s.videoMode,ready:s.ready&&el.readyState>=3,seeking:el.seeking,hidden:document.hidden,ended:elapsed>=duration,confirmed:s.confirmed,valid:motion.valid,sampledAt:frame.current.stampedAt,now:performance.now()}))return null;
+    if(s.switching||!el||!ownsController.current||calibrationRun.current||!s.mounting.verified||s.strength<=0||s.flexDemo||!s.fits||!canSendMotion({playing:!el.paused,videoMode:s.videoMode,ready:s.ready&&el.readyState>=3,seeking:el.seeking,hidden:document.hidden,ended:elapsed>=duration,confirmed:s.confirmed,valid:motion.valid,sampledAt:frame.current.stampedAt,now:performance.now()}))return null;
     const car=commandedPoseDegrees(motion,s.amplitudes);
     return {...carPoseToFirmwarePose(car,20,s.mounting),sampledAt:frame.current.stampedAt};
   };
@@ -191,12 +204,52 @@ export default function App({ setupMode = false }: { setupMode?: boolean }) {
     return()=>window.removeEventListener('storage',changed);
   },[pause]);
   useEffect(()=>{
-    let cancelled=false;
-    loadOfficialMedia().then((data:Media)=>{
-      if(cancelled||userSelectedSource.current)return;setMedia(data);setSource(data.url);setOffset(data.lapStartSeconds??0);setConfirmed(true);
-    }).catch(e=>{if(!cancelled&&!userSelectedSource.current)setError(e.message);});
-    return ()=>{cancelled=true;};
+    const controller=new AbortController();
+    fetch(assetUrl('/data/season-2026.json'),{signal:controller.signal}).then(async response=>{
+      if(!response.ok || !response.headers.get('content-type')?.includes('json'))throw new Error('Season library is unavailable. Singapore remains ready.');
+      const catalog=await response.json();
+      if(catalog.season!==2026||!Array.isArray(catalog.events)||!catalog.events.some((event:SeasonEvent)=>event.id==='singapore'))throw new Error('Season catalog is incomplete.');
+      setEvents(catalog.events);
+    }).catch(error=>{if(!controller.signal.aborted)setLibraryError(error.message);});
+    return()=>{controller.abort();loader.current.cancel();switchGeneration.current++;};
   },[]);
+  useEffect(()=>{
+    let cancelled=false;
+    const load=async()=>{
+      let entry:EventMedia|undefined;
+      try {
+        const response=await fetch(assetUrl('/data/season-2026-media.json'));
+        if(response.ok && response.headers.get('content-type')?.includes('json'))entry=(await response.json()).events?.[replay.event.id];
+      } catch { /* Existing Singapore remains available if the season catalog is offline. */ }
+      if(!entry&&replay.event.id==='singapore')entry=SINGAPORE_MEDIA;
+      if(cancelled||userSelectedSource.current)return;
+      if(!entry?.videoId)throw new Error('An official onboard is not available for this round yet. Use telemetry preview or select a local video.');
+      const data=await loadOfficialMedia(entry);
+      if(cancelled||userSelectedSource.current)return;
+      setMedia(data);setSource(data.url);setSourceLabel('Official F1 onboard');setOffset(data.lapStartSeconds??0);setConfirmed(data.syncVerified);
+      if(!data.syncVerified)setSyncOpen(true);
+    };
+    void load().catch(e=>{if(!cancelled&&!userSelectedSource.current)setError(e.message);});
+    return ()=>{cancelled=true;};
+  },[replay.event.id]);
+  const selectReplay=useCallback(async(event:SeasonEvent)=>{
+    if(event.id===replay.event.id||event.status!=='available'||!event.fixtureUrl||calibrationRun.current||switching)return;
+    const generation=++switchGeneration.current;
+    playRequest.current=null;latest.current.switching=true;
+    video.current?.pause();setPlaying(false);setFlexDemo(false);setSwitching(true);setLibraryError('');
+    try {
+      await settleReplaySwitch(session.current);
+      const fixture=await loader.current.load(event,assetUrl(event.fixtureUrl));
+      if(!fixture||generation!==switchGeneration.current)return;
+      // Clear every clock before the new fixture becomes visible. USB ownership
+      // and observed mounting survive this change; motion intent does not.
+      latest.current.ready=false;latest.current.confirmed=false;
+      frame.current={time:0,stampedAt:0};userSelectedSource.current=false;
+      setReady(false);setMedia(null);setSource('');setOffset(0);setConfirmed(false);setVideoDuration(0);setTime(0);setVideoMode(true);setSyncOpen(false);setError('');setSourceLabel('Official F1 onboard');
+      setReplay({event,fixture});
+    }catch(error){if(generation===switchGeneration.current)setLibraryError(error instanceof Error?error.message:'Replay could not load.');}
+    finally{if(generation===switchGeneration.current){setSwitching(false);latest.current.switching=false;}}
+  },[replay.event.id,switching]);
   useEffect(()=>()=>{if(source.startsWith('blob:'))URL.revokeObjectURL(source);},[source]);
   useEffect(()=>{
     const el=video.current;if(!el || !source)return;
@@ -225,7 +278,7 @@ export default function App({ setupMode = false }: { setupMode?: boolean }) {
       last=now;id=requestAnimationFrame(tick);
     };
     id=requestAnimationFrame(tick);return ()=>cancelAnimationFrame(id);
-  },[rate,stopMotion]);
+  },[rate,stopMotion,duration]);
   useEffect(()=>{
     const hidden=()=>{if(document.hidden){pause();}};
     const exit=()=>{stopMotion('Page closed');};
@@ -236,7 +289,7 @@ export default function App({ setupMode = false }: { setupMode?: boolean }) {
   useEffect(()=>{if(!flexDemo)return;let id=0;const began=performance.now();const tick=(now:number)=>{setFlexPhase((now-began)/1000);id=requestAnimationFrame(tick);};id=requestAnimationFrame(tick);return()=>cancelAnimationFrame(id);},[flexDemo]);
 
   const toggle=useCallback(async()=>{
-    if(calibration.current?.isRunning||calibrationRun.current)return;
+    if(latest.current.switching||calibration.current?.isRunning||calibrationRun.current)return;
     setFlexDemo(false);
     if(playRequest.current||latest.current.playing||session.current?.wantsMotion||!video.current?.paused){pause();return;}
     if(latest.current.time>=duration){setTime(0);if(video.current)video.current.currentTime=latest.current.offset;}
@@ -257,7 +310,7 @@ export default function App({ setupMode = false }: { setupMode?: boolean }) {
     }catch{
       stopMotion('Playback could not start');setError('Playback could not start. Check the BaBot status and try Play again.');
     }finally{if(playRequest.current===request)playRequest.current=null;}
-  },[pause,stopMotion,hasSerial,connectionState.phase]);
+  },[pause,stopMotion,hasSerial,connectionState.phase,duration]);
   useEffect(()=>{
     const key=(event:KeyboardEvent)=>{if(event.code==='Space' && !event.defaultPrevented && !(event.target as HTMLElement).closest('input,select,button,textarea,a,summary,[contenteditable="true"]')){event.preventDefault();void toggle();}if(event.key==='Escape')pause();};
     window.addEventListener('keydown',key);return()=>window.removeEventListener('keydown',key);
@@ -271,7 +324,7 @@ export default function App({ setupMode = false }: { setupMode?: boolean }) {
   const connect=async()=>{pause();await connection.current?.connect();};
   const disconnect=()=>{pause();void connection.current?.disconnect();};
   const runAxis=async(axis:CalibrationAxis):Promise<boolean>=>{
-    if(!ownsController.current||!connected||busy||calibrationRun.current||calibration.current?.isRunning||document.hidden)return false;
+    if(latest.current.switching||!ownsController.current||!connected||busy||calibrationRun.current||calibration.current?.isRunning||document.hidden)return false;
     calibrationRun.current=true;setRunningAxis(axis);setFlexDemo(false);
     video.current?.pause();setPlaying(false);
     try {
@@ -305,8 +358,8 @@ export default function App({ setupMode = false }: { setupMode?: boolean }) {
     const next=clamp(value,0,1);
     pause();latest.current.strength=next;latest.current.amplitudes=motionAmplitudes(next);setStrength(next);
   };
-  const telemetryPath=useMemo(()=>carSamples.map((row,i)=>`${i?'L':'M'}${(row[0]/1000/duration*1000).toFixed(1)},${(96-row[1]/350*85).toFixed(1)}`).join(' '),[]);
-  const throttlePath=useMemo(()=>carSamples.map((row,i)=>`${i?'L':'M'}${(row[0]/1000/duration*1000).toFixed(1)},${(96-row[3]/100*85).toFixed(1)}`).join(' '),[]);
+  const telemetryPath=useMemo(()=>carSamples.map((row,i)=>`${i?'L':'M'}${(row[0]/1000/duration*1000).toFixed(1)},${(96-row[1]/350*85).toFixed(1)}`).join(' '),[carSamples,duration]);
+  const throttlePath=useMemo(()=>carSamples.map((row,i)=>`${i?'L':'M'}${(row[0]/1000/duration*1000).toFixed(1)},${(96-row[3]/100*85).toFixed(1)}`).join(' '),[carSamples,duration]);
   const trackPoint=project(sample.x,sample.y);
   const sectors=lap.sectorDurationSeconds;
   const sector=time<sectors[0]?1:time<sectors[0]+sectors[1]?2:3;
@@ -318,31 +371,33 @@ export default function App({ setupMode = false }: { setupMode?: boolean }) {
   return <main>
     <header className="topbar"><a className="brand" href="#"><span className="brand-mark">b.</span><span>BABOT <em>LAP PLAYER</em></span></a><a className="setup-link" href="#setup" onClick={pause}>Set up your BaBot <span aria-hidden="true">↗</span></a></header>
     {setupMode && <section className="setup-handoff" aria-label="Finish BaBot setup">
-      <div><span className="eyebrow">FIRMWARE CHECKED · NEXT: MOUNTING</span><h2>{mounting.verified ? 'Ready for the Singapore lap.' : 'Make the motion match your model.'}</h2><p>{mounting.verified ? 'Start at 25% strength. Press Play lap when the video is ready; Pause or Level + stop returns the platform to level.' : 'Connect the separate Power Up supply, place your model with its nose toward the screen, then complete both 1° mounting checks below. Connecting USB alone never starts motion.'}</p></div>
+      <div><span className="eyebrow">FIRMWARE CHECKED · NEXT: MOUNTING</span><h2>{mounting.verified ? 'Ready for the lap.' : 'Make the motion match your model.'}</h2><p>{mounting.verified ? 'Start at 25% strength. Press Play lap when the video is ready; Pause or Level + stop returns the platform to level.' : 'Connect the separate Power Up supply, place your model with its nose toward the screen, then complete both 1° mounting checks below. Connecting USB alone never starts motion.'}</p></div>
       <button onClick={() => document.getElementById('babot-hardware')?.scrollIntoView({ behavior: 'smooth', block: 'start' })}>{mounting.verified ? 'View motion controls' : 'Check mounting ↓'}</button>
     </section>}
-    <section className="intro"><div><div className="eyebrow">FORMULA 1 · QUALIFYING · 10 OCT 2026</div><h1>Singapore<span className="title-dot">.</span></h1></div><div className="driver"><span className="driver-number">03</span><div><span className="eyebrow">POLE POSITION</span><h2>Max Verstappen</h2><span className="driver-team">RED BULL RACING <b>1:31.373</b></span></div></div></section>
-    <div className="session-strip"><span><i/> MAIN QUALIFYING / LAP {lap.lapNumber}</span><span>MARINA BAY STREET CIRCUIT</span><span>347 TELEMETRY SAMPLES <b>↗</b></span></div>
+    <SeasonLibrary events={events} selected={replay.event.id} loading={switching||runningAxis!==null} onSelect={selectReplay} error={libraryError}/>
+    <section className="intro"><div><div className="eyebrow">FORMULA 1 · QUALIFYING · {new Date(lap.lapStartUtc).toLocaleDateString('en-GB',{day:'2-digit',month:'short',year:'numeric',timeZone:'UTC'}).toUpperCase()}</div><h1>{replay.event.name.replace(/ Grand Prix$/,'')}<span className="title-dot">.</span></h1></div><div className="driver"><span className="driver-number">{String(lap.driverNumber).padStart(2,'0')}</span><div><span className="eyebrow">POLE POSITION</span><h2>{lap.driverName}</h2><span className="driver-team">{lap.team.toUpperCase()} <b>{clock(duration)}</b></span></div></div></section>
+    <div className="session-strip"><span><i/> MAIN QUALIFYING / LAP {lap.lapNumber}</span><span>{lap.circuit.toUpperCase()}</span><span>{carSamples.length} TELEMETRY SAMPLES <b>↗</b></span></div>
+    {(replay.event.motionCoverage?.unavailableSeconds??0)>0&&<p className="coverage-note">This lap has {replay.event.motionCoverage!.unavailableSeconds.toFixed(2)}s of unsupported motion data. BaBot suspends across these gaps; video and telemetry remain available.</p>}
     <section className="viewer-grid">
       <article className="panel onboard-panel"><div className="panel-head"><h2><span>01</span> Onboard</h2><span className={loaded?'live-badge':'muted-label'}>{loaded?'● VIDEO CLOCK':videoMode?'LOADING VIDEO':'TELEMETRY PREVIEW'}</span></div>
         <div className="video-stage">
-          <video ref={video} src={source||undefined} poster={media?.poster} playsInline preload="auto" muted={muted} aria-label="Max Verstappen 2026 Singapore pole onboard" onLoadedMetadata={()=>{const el=video.current!;setVideoDuration(el.duration);setReady(true);el.playbackRate=rate;el.currentTime=offset;frame.current={time:offset,stampedAt:0};setError('');}}
+          <video key={replay.event.id} ref={video} src={source||undefined} poster={media?.poster} playsInline preload="auto" muted={muted} aria-label={`${lap.driverName} 2026 ${replay.event.name} pole onboard`} onLoadedMetadata={()=>{const el=video.current!;setVideoDuration(el.duration);setReady(true);el.playbackRate=rate;el.currentTime=offset;frame.current={time:offset,stampedAt:0};setError('');}}
           onPlaying={()=>setPlaying(true)} onPause={()=>{setPlaying(false);if(!calibrationRun.current)stopMotion('Playback paused · motion stopped');}} onWaiting={()=>suspendMotion('Video buffering · motion will resume with playback')} onSeeking={()=>suspendMotion('Seeking · waiting for the video clock')} onEnded={()=>{setPlaying(false);stopMotion('Video ended · motion stopped');}} onError={()=>{setReady(false);setPlaying(false);stopMotion('Video unavailable');setError('Official video unavailable in this browser. Select a local MP4 to sync your replay.');}} />
-          {!playing&&<button className="video-play" onClick={()=>void toggle()} disabled={(videoMode&&!ready)||runningAxis!==null} aria-label="Play lap"><PlayIcon/></button>}
-          <div className="video-corner"><span>VER / 03</span><span>{clock(time)}</span></div>
+          {!playing&&<button className="video-play" onClick={()=>void toggle()} disabled={switching||(videoMode&&!ready)||runningAxis!==null} aria-label="Play lap"><PlayIcon/></button>}
+          <div className="video-corner"><span>{lap.driverAcronym} / {String(lap.driverNumber).padStart(2,'0')}</span><span>{clock(time)}</span></div>
           {!videoMode&&<div className="preview-overlay">TELEMETRY PREVIEW<span>Video is paused. USB motion is disabled.</span></div>}
         </div>
         <div className="video-footer"><span title={sourceLabel}>{sourceLabel}</span><div><label className="text-button file-label">Open video<input type="file" accept="video/mp4,video/webm,video/quicktime,.mov,.m4v" onChange={selectFile}/></label><button className="text-button" onClick={()=>setSyncOpen(!syncOpen)}>Adjust sync <span>↗</span></button></div></div>
       </article>
-      <article className="panel ribbon-panel"><div className="panel-head"><h2><span>02</span> Twin Ribbon</h2><span className="muted-label">BLENDER · 50 FPS</span></div><div className="ribbon-stage"><BlenderRibbon timeSeconds={time} playing={playing} playbackRate={rate} duration={duration}/><div className="ribbon-caption"><strong>{Math.round(sample.rpm).toLocaleString()}<small>RPM</small></strong></div></div><div className="ribbon-legend"><span><i className="legend-width"/> THROTTLE <b>WIDTH</b></span><span><i className="legend-height"/> SPEED <b>HEIGHT</b></span><span><i className="legend-color"/> RPM <b>COLOR</b></span></div></article>
+      <article className="panel ribbon-panel"><div className="panel-head"><h2><span>02</span> Twin Ribbon</h2><span className="muted-label">{renderedRibbonId===replay.event.id?'BLENDER · 50 FPS':'LIVE PREVIEW'}</span></div><div className="ribbon-stage"><BlenderRibbon key={replay.event.id} timeSeconds={time} playing={playing} playbackRate={rate} duration={duration} manifestPath={`/media/2026/${replay.event.id}/ribbon.json`} datasetId={lap.datasetId} eventName={replay.event.name} samples={carSamples} onFilmReady={()=>setRenderedRibbonId(replay.event.id)}/><div className="ribbon-caption"><strong>{Math.round(sample.rpm).toLocaleString()}<small>RPM</small></strong></div></div><div className="ribbon-legend"><span><i className="legend-width"/> THROTTLE <b>WIDTH</b></span><span><i className="legend-height"/> SPEED <b>HEIGHT</b></span><span><i className="legend-color"/> RPM <b>COLOR</b></span></div></article>
     </section>
     {error&&<div className="notice" role="alert">{error} <a href={officialVideo} target="_blank" rel="noreferrer">Official onboard ↗</a></div>}
-    {syncOpen&&<section className="sync-panel"><div><h3>Align the start / finish line</h3><p>Lap zero is the frame the car crosses the timing line. Set its video timestamp, then check the alignment. Changing it stops motion.</p></div><label>Lap start in video<input aria-label="Lap start in video seconds" type="number" min="0" max={Math.max(0,videoDuration-duration)} step="0.02" value={offset} onChange={e=>changeOffset(Number(e.target.value))}/><small>seconds</small></label><div className="sync-buttons"><button onClick={()=>changeOffset(offset-.02)}>− 1 frame</button><button onClick={()=>changeOffset(offset+.02)}>+ 1 frame</button><button onClick={()=>{seek(0);}}>Go to lap start</button><button onClick={()=>{pause();if(video.current)changeOffset(video.current.currentTime);}}>Use current frame</button></div><label className="check"><input type="checkbox" checked={confirmed} disabled={!ready||!fits||!videoMode} onChange={e=>{stopMotion();setConfirmed(e.target.checked);}}/>Start-line alignment checked</label>{!fits&&ready&&<span className="warning">The selected video must contain the full 1:31.373 lap.</span>}</section>}
-    <section className="transport" aria-label="Playback controls"><div className="transport-main"><button className="play-button" onClick={()=>void toggle()} disabled={(videoMode&&!ready)||runningAxis!==null} aria-label={playing?'Pause replay':'Play replay'}><PlayIcon playing={playing}/><span>{playing?'Pause':'Play lap'}</span></button><button className="restart" aria-label="Restart lap" onClick={()=>seek(0)}>↺</button><div className="lap-clock">{clock(time)}<span> / {clock(duration)}</span></div><div className="transport-options"><button className="mode-button" onClick={()=>{pause();setVideoMode(!videoMode);if(!videoMode&&video.current)video.current.currentTime=videoTime(time,offset,duration);}}>{videoMode?'Video sync':'Telemetry preview'} <span>⌄</span></button><label className="rate-label"><select aria-label="Playback speed" value={rate} onChange={e=>{setRate(Number(e.target.value));if(video.current)video.current.playbackRate=Number(e.target.value);}}><option value=".5">0.5×</option><option value="1">1×</option><option value="1.5">1.5×</option><option value="2">2×</option></select></label><button className="text-button" onClick={()=>setMuted(!muted)} aria-label={muted?'Unmute video':'Mute video'}>{muted?'Sound off':'Sound on'}</button></div></div><div className="timeline"><div className="sector-lines"><span style={{left:`${sectors[0]/duration*100}%`}}/><span style={{left:`${(sectors[0]+sectors[1])/duration*100}%`}}/></div><input aria-label="Lap timeline" type="range" min="0" max={duration} step="0.001" value={time} onChange={e=>seek(Number(e.target.value))} style={{'--progress':`${time/duration*100}%`} as React.CSSProperties}/></div><div className="timeline-labels"><span>START</span>{sectors.map((s,i)=><button key={i} className={sector===i+1?'current-sector':''} onClick={()=>seek(i===0?0:sectors.slice(0,i).reduce((a,b)=>a+b,0))}>S{i+1} <b>{s.toFixed(3)}</b></button>)}<span>FINISH</span></div></section>
+    {syncOpen&&<section className="sync-panel"><div><h3>Align the start / finish line</h3><p>{media?.offsetNote} Lap zero is the frame the car crosses the timing line. Set its video timestamp, then check the alignment. Changing it stops motion.</p></div><label>Lap start in video<input aria-label="Lap start in video seconds" type="number" min="0" max={Math.max(0,videoDuration-duration)} step="0.02" value={offset} onChange={e=>changeOffset(Number(e.target.value))}/><small>seconds</small></label><div className="sync-buttons"><button onClick={()=>changeOffset(offset-.02)}>− 1 frame</button><button onClick={()=>changeOffset(offset+.02)}>+ 1 frame</button><button onClick={()=>{seek(0);}}>Go to lap start</button><button onClick={()=>{pause();if(video.current)changeOffset(video.current.currentTime);}}>Use current frame</button></div><label className="check"><input type="checkbox" checked={confirmed} disabled={!ready||!fits||!videoMode} onChange={e=>{stopMotion();setConfirmed(e.target.checked);}}/>Start-line alignment checked</label>{!fits&&ready&&<span className="warning">The selected video must contain the full {clock(duration)} lap.</span>}</section>}
+    <section className="transport" aria-label="Playback controls"><div className="transport-main"><button className="play-button" onClick={()=>void toggle()} disabled={switching||(videoMode&&!ready)||runningAxis!==null} aria-label={playing?'Pause replay':'Play replay'}><PlayIcon playing={playing}/><span>{playing?'Pause':'Play lap'}</span></button><button className="restart" aria-label="Restart lap" onClick={()=>seek(0)}>↺</button><div className="lap-clock">{clock(time)}<span> / {clock(duration)}</span></div><div className="transport-options"><button className="mode-button" onClick={()=>{pause();setVideoMode(!videoMode);if(!videoMode&&video.current)video.current.currentTime=videoTime(time,offset,duration);}}>{videoMode?'Video sync':'Telemetry preview'} <span>⌄</span></button><label className="rate-label"><select aria-label="Playback speed" value={rate} onChange={e=>{setRate(Number(e.target.value));if(video.current)video.current.playbackRate=Number(e.target.value);}}><option value=".5">0.5×</option><option value="1">1×</option><option value="1.5">1.5×</option><option value="2">2×</option></select></label><button className="text-button" onClick={()=>setMuted(!muted)} aria-label={muted?'Unmute video':'Mute video'}>{muted?'Sound off':'Sound on'}</button></div></div><div className="timeline"><div className="sector-lines"><span style={{left:`${sectors[0]/duration*100}%`}}/><span style={{left:`${(sectors[0]+sectors[1])/duration*100}%`}}/></div><input aria-label="Lap timeline" type="range" min="0" max={duration} step="0.001" value={time} onChange={e=>seek(Number(e.target.value))} style={{'--progress':`${time/duration*100}%`} as React.CSSProperties}/></div><div className="timeline-labels"><span>START</span>{sectors.map((s,i)=><button key={i} className={sector===i+1?'current-sector':''} onClick={()=>seek(i===0?0:sectors.slice(0,i).reduce((a,b)=>a+b,0))}>S{i+1} <b>{s.toFixed(3)}</b></button>)}<span>FINISH</span></div></section>
     {conceptsOpen&&<ChassisGallery selected={conceptId} onSelect={id=>{pause();setConceptId(id);setConceptsOpen(false);setFlexDemo(true);}} onClose={()=>setConceptsOpen(false)}/>}
     <section className="lower-grid">
       <article className="panel chassis-panel"><div className="panel-head"><h2><span>03</span> Rolling chassis</h2><button className="concept-trigger" onClick={()=>setConceptsOpen(!conceptsOpen)}>CHASSIS CONCEPTS ↗</button></div><div className="chassis-stage"><ConceptChassis conceptId={conceptId} roll={flexDemo?Math.sin(flexPhase*.9)*8:pose.roll} pitch={flexDemo?Math.sin(flexPhase*.65)*2:pose.pitch} distanceMeters={flexDemo?0:distanceAt(distance,time)} valid={flexDemo||sample.valid}/></div><div className="flex-controls"><button onClick={()=>{pause();setFlexDemo(!flexDemo);}}>{flexDemo?'Stop flex demo':'Preview suspension flex'}</button><span>{flexDemo?'CONCEPT DEMO · VISUAL ONLY':'DERIVED POSE · CONCEPTUAL SUSPENSION'}</span></div><div className="pose-readout"><span>ROLL <b>{pose.roll>=0?'+':''}{pose.roll.toFixed(2)}°</b></span><span>PITCH <b>{pose.pitch>=0?'+':''}{pose.pitch.toFixed(2)}°</b></span><span className="muted-label">DISPLAY ANGLES</span></div></article>
-      <article className="panel telemetry-panel"><div className="panel-head"><h2><span>04</span> Telemetry</h2><span className="muted-label">{sample.reconstructed?'RECONSTRUCTED CUE':sample.sourceValid?`S${sector}`:'INTERPOLATED GAP'}</span></div><div className="metrics"><Metric label="SPEED" value={String(Math.round(sample.speedKph))} unit="KM/H"/><Metric label="GEAR" value={String(sample.gear)} tone="orange"/><Metric label="ENGINE" value={(sample.rpm/1000).toFixed(1)} unit="×1000 RPM"/></div><div className="input-bars"><div><span>THROTTLE</span><div className="bar"><i style={{width:`${sample.throttlePct}%`}}/></div><b>{Math.round(sample.throttlePct)}%</b></div><div><span>BRAKE</span><div className="bar brake"><i style={{width:sample.brakeOn?'100%':'0%'}}/></div><b>{sample.brakeOn?'ON':'OFF'}</b></div></div><div className="track-row"><svg viewBox="0 0 200 120" role="img" aria-label="Position on Marina Bay circuit"><path d={trackPath} fill="none" stroke="#3a4e50" strokeWidth="3"/><circle cx={trackPoint[0]} cy={trackPoint[1]} r="5" fill="#ff7c42"/></svg><div><span className="eyebrow">ESTIMATED ACCELERATION</span><p><b>{sample.valid?sample.latG.toFixed(2):'—'}</b> lateral G</p><p><b>{sample.valid?sample.longG.toFixed(2):'—'}</b> longitudinal G</p><small>Derived from speed + path</small></div></div></article>
+      <article className="panel telemetry-panel"><div className="panel-head"><h2><span>04</span> Telemetry</h2><span className="muted-label">{sample.reconstructed?'RECONSTRUCTED CUE':sample.sourceValid?`S${sector}`:'INTERPOLATED GAP'}</span></div><div className="metrics"><Metric label="SPEED" value={String(Math.round(sample.speedKph))} unit="KM/H"/><Metric label="GEAR" value={String(sample.gear)} tone="orange"/><Metric label="ENGINE" value={(sample.rpm/1000).toFixed(1)} unit="×1000 RPM"/></div><div className="input-bars"><div><span>THROTTLE</span><div className="bar"><i style={{width:`${sample.throttlePct}%`}}/></div><b>{Math.round(sample.throttlePct)}%</b></div><div><span>BRAKE</span><div className="bar brake"><i style={{width:sample.brakeOn?'100%':'0%'}}/></div><b>{sample.brakeOn?'ON':'OFF'}</b></div></div><div className="track-row"><svg viewBox="0 0 200 120" role="img" aria-label={`Position on ${lap.circuit} circuit`}><path d={trackPath} fill="none" stroke="#3a4e50" strokeWidth="3"/><circle cx={trackPoint[0]} cy={trackPoint[1]} r="5" fill="#ff7c42"/></svg><div><span className="eyebrow">ESTIMATED ACCELERATION</span><p><b>{sample.valid?sample.latG.toFixed(2):'—'}</b> lateral G</p><p><b>{sample.valid?sample.longG.toFixed(2):'—'}</b> longitudinal G</p><small>Derived from speed + path</small></div></div></article>
       <article className="panel hardware-panel" id="babot-hardware">
         <div className="panel-head"><h2><span>05</span> BaBot</h2><span className={`hardware-state ${active?'active':''}`}>{connectionBadge}</span></div>
         <div className="hardware-body">
@@ -357,11 +412,11 @@ export default function App({ setupMode = false }: { setupMode?: boolean }) {
           <p className="hardware-pose">Replay target roll {hardwarePose.roll.toFixed(2)}° · pitch {hardwarePose.pitch.toFixed(2)}°<span>Car axes · requested, not measured</span></p>
           <p className="connection-footnote">USB verifies the controller; motor power is separate. Reconnection never starts motion.</p>
           {!connected && <a className="firmware-help-link" href="#setup" onClick={pause}>Stock BaBot or firmware not found? Open setup →</a>}
-          <AxisCalibrationPanel mounting={mounting} connected={connected} busy={busy||starting} runningAxis={runningAxis} onPulse={runAxis} onStop={()=>pause()} onApply={applyMounting} onOpen={openMounting} onBeginCheck={beginMountingCheck} readOnly={controllerReadOnly} initiallyOpen={setupMode}/>
+          <AxisCalibrationPanel mounting={mounting} connected={connected} busy={busy||starting||switching} runningAxis={runningAxis} onPulse={runAxis} onStop={()=>pause()} onApply={applyMounting} onOpen={openMounting} onBeginCheck={beginMountingCheck} readOnly={controllerReadOnly} initiallyOpen={setupMode}/>
         </div>
       </article>
     </section>
     <section className="panel trace-panel"><div className="panel-head"><h2>Lap trace</h2><span className="trace-legend"><i/> SPEED <i/> THROTTLE</span><span className="muted-label">{clock(time)}</span></div><svg viewBox="0 0 1000 110" preserveAspectRatio="none" role="img" aria-label="Speed and throttle through the lap"><path d="M0 25H1000M0 60H1000M0 95H1000" stroke="#223034" strokeWidth=".7"/><path d={throttlePath} fill="none" stroke="#5faba4" strokeWidth="1.1" opacity=".6"/><path d={telemetryPath} fill="none" stroke="#f88a55" strokeWidth="1.8"/><line x1={time/duration*1000} x2={time/duration*1000} y1="0" y2="110" stroke="#e8ece6" strokeWidth="1"/></svg></section>
-    <footer><p>Recorded OpenF1 telemetry. Roll, pitch and acceleration are derived cues; suspension is visual only.</p><a href={String(fixture.provenance.sourceUrls.officialQualifyingResults)} target="_blank" rel="noreferrer">Results ↗</a><a href={officialVideo} target="_blank" rel="noreferrer">Onboard ↗</a><a href="https://openf1.org/docs/" target="_blank" rel="noreferrer">Data ↗</a></footer>
+    <footer><p>Recorded OpenF1 telemetry. Roll, pitch and acceleration are derived cues; suspension is visual only.</p><a href={String(fixture.provenance.sourceUrls.officialQualifyingResults||fixture.provenance.sourceUrls.sessionResult)} target="_blank" rel="noreferrer">Results ↗</a><a href={officialVideo} target="_blank" rel="noreferrer">Onboard ↗</a><a href="https://openf1.org/docs/" target="_blank" rel="noreferrer">Data ↗</a></footer>
   </main>;
 }

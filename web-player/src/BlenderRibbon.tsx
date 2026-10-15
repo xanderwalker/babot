@@ -1,11 +1,12 @@
 import { useEffect, useRef, useState } from 'react';
 import { assetUrl } from './asset-url';
+import { Ribbon } from './Visuals';
 
-type RibbonManifest = { src: string; poster?: string; fps: number; startTimeSeconds: number; duration: number; title: string };
+type RibbonManifest = { datasetId?: string; src: string; poster?: string; fps: number; startTimeSeconds: number; duration: number; title: string };
 const MASTER_STALE_MS = 180;
 
 /** The onboard remains authoritative. This media element only follows its lap clock. */
-export function BlenderRibbon({timeSeconds, playing, playbackRate, duration}: {timeSeconds:number;playing:boolean;playbackRate:number;duration:number}) {
+export function BlenderRibbon({timeSeconds, playing, playbackRate, duration, manifestPath='/media/ribbon.json', eventName='Singapore Grand Prix', samples, onFilmReady, datasetId}: {timeSeconds:number;playing:boolean;playbackRate:number;duration:number;manifestPath?:string;eventName?:string;samples?:number[][];onFilmReady?:()=>void;datasetId?:string}) {
   const element=useRef<HTMLVideoElement>(null);
   const masterClock=useRef({time:Number.NaN,advancedAt:-Infinity});
   const [manifest,setManifest]=useState<RibbonManifest|null>(null);
@@ -19,21 +20,22 @@ export function BlenderRibbon({timeSeconds, playing, playbackRate, duration}: {t
     const controller=new AbortController();
     const check=async()=>{
       try {
-        const response=await fetch(assetUrl('/media/ribbon.json'),{signal:controller.signal,cache:'no-store'});
+        const response=await fetch(assetUrl(manifestPath),{signal:controller.signal,cache:'no-store'});
         if(!response.ok || !response.headers.get('content-type')?.includes('json'))throw new Error('pending');
         const value:RibbonManifest=await response.json();
+        if((datasetId && value.datasetId!==datasetId) || !value.src || Math.abs(value.duration-duration)>.04 || value.startTimeSeconds!==0 || value.fps!==50)throw new Error('Ribbon timing does not match this lap.');
         if(cancelled)return;
         setManifest({...value,src:assetUrl(value.src),poster:value.poster?assetUrl(value.poster):undefined});setError('');
       } catch {
         if(cancelled)return;
-        setError('Rendering this lap with the existing Blender workflow.');
-        try { const r=await fetch(assetUrl('/media/ribbon-progress.json'),{signal:controller.signal,cache:'no-store'});if(r.ok&&r.headers.get('content-type')?.includes('json')){const p=await r.json();if(!cancelled)setProgress(p);}} catch {}
-        if(!cancelled)timer=setTimeout(check,5000);
+        setError('Live telemetry preview. The Blender film is not available yet.');
+        try { const r=await fetch(assetUrl(manifestPath.replace(/ribbon\.json$/,'ribbon-progress.json')),{signal:controller.signal,cache:'no-store'});if(r.ok&&r.headers.get('content-type')?.includes('json')){const p=await r.json();if(!cancelled)setProgress(p);}} catch {}
+        if(!cancelled)timer=setTimeout(check,30000);
       }
     };
     void check();
     return()=>{cancelled=true;controller.abort();clearTimeout(timer);};
-  },[]);
+  },[manifestPath,duration,datasetId]);
   useEffect(()=>{
     if(!manifest)return;
     let cancelled=false, objectUrl='';
@@ -85,9 +87,10 @@ export function BlenderRibbon({timeSeconds, playing, playbackRate, duration}: {t
     return()=>clearInterval(watchdog);
   },[playing,ready,manifest]);
   return <div className="blender-ribbon">
-    {!videoUrl?<img className="ribbon-preview-still" src={manifest?.poster||assetUrl('/media/singapore-2026-ribbon-poster.jpg')} alt="Preview still from this lap's Blender ribbon render"/>:null}
-    {manifest&&videoUrl?<video key={videoUrl} ref={element} src={videoUrl} poster={manifest.poster} muted playsInline preload="auto" aria-label="Blender-rendered Twin Ribbon of the 2026 Singapore pole lap" onLoadedMetadata={()=>{setReady(true);setLoading(false);setError('');}} onError={()=>{setReady(false);setLoading(false);setError('Ribbon video unavailable. Reload to try again.');}}/>:null}
+    {!videoUrl&&samples?<Ribbon samples={samples} timeSeconds={timeSeconds} duration={duration}/>:null}
+    {!videoUrl&&!samples&&manifest?.poster?<img className="ribbon-preview-still" src={manifest.poster} alt="Preview still from this lap's Blender ribbon render"/>:null}
+    {manifest&&videoUrl?<video key={videoUrl} ref={element} src={videoUrl} poster={manifest.poster} muted playsInline preload="auto" aria-label={`Blender-rendered Twin Ribbon of the 2026 ${eventName} pole lap`} onLoadedMetadata={()=>{setReady(true);setLoading(false);setError('');onFilmReady?.();}} onError={()=>{setReady(false);setLoading(false);setError('Ribbon video unavailable. Reload to try again.');}}/>:null}
     {loading?<div className="ribbon-render-status" role="status"><span>LOADING RIBBON VIDEO</span><p>Preparing the ribbon film for synchronized playback.</p></div>:null}
-    {error?<div className="ribbon-render-status" role="status"><span>{manifest?(ready?'RIBBON PLAYBACK ERROR':'RIBBON LOAD ERROR'):'PREVIEW STILL / RENDER IN PROGRESS'}</span><p>{error}</p>{!manifest&&progress&&progress.total>0?<small>{Math.round(progress.completed/progress.total*100)}% · {progress.completed.toLocaleString()} / {progress.total.toLocaleString()} frames</small>:null}</div>:null}
+    {error?<div className="ribbon-render-status" role="status"><span>{manifest?(ready?'RIBBON PLAYBACK ERROR':'RIBBON LOAD ERROR'):'LIVE RIBBON PREVIEW'}</span><p>{error}</p>{!manifest&&progress&&progress.total>0?<small>{Math.round(progress.completed/progress.total*100)}% · {progress.completed.toLocaleString()} / {progress.total.toLocaleString()} frames</small>:null}</div>:null}
   </div>;
 }

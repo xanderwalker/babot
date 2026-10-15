@@ -66,3 +66,6 @@ __pycache__/
 /reliability-evidence/
 /qa/
 web-player/tests/browser/verified-*.json
+
+# Resumable public-API and local media verification caches
+web-player/.openf1-pole-cache/
