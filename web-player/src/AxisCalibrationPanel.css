@@ -1,0 +1,102 @@
+.axis-calibration {
+  grid-column: 1 / -1;
+  min-width: 0;
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line, #263437);
+  color: #d6e1dd;
+}
+
+.axis-calibration-heading {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+}
+
+.axis-calibration-state {
+  font: 9px 'IBM Plex Mono', monospace;
+  color: #a3b1b4;
+}
+
+.axis-calibration-state.is-verified { color: var(--mint, #96cfc2); }
+.axis-calibration button { font-size: 10px; line-height: 1.4; }
+.axis-calibration-heading button { padding: 6px 9px; flex-shrink: 0; }
+.axis-calibration-body { padding-top: 8px; }
+
+.axis-calibration-body p {
+  margin: 8px 0;
+  font-size: 11px;
+  line-height: 1.5;
+  color: #a3b6ba;
+}
+
+.axis-calibration-body .axis-calibration-expected { font-size: 10px; }
+.axis-calibration-expected strong { font-weight: 500; color: #d5e2dd; }
+
+.axis-calibration-clear {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 13px 0;
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.axis-calibration-clear input {
+  flex-shrink: 0;
+  width: 14px;
+  height: 14px;
+  margin: 1px 0 0;
+  accent-color: var(--orange, #ff824b);
+}
+
+.axis-calibration-checks {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 9px;
+}
+
+.axis-calibration-check {
+  min-width: 0;
+  margin: 0;
+  padding: 9px;
+  border: 1px solid var(--line, #263437);
+  border-radius: 3px;
+  background: #0c1518;
+}
+
+.axis-calibration-check legend {
+  padding: 0 4px;
+  color: var(--mint, #96cfc2);
+  font-size: 11px;
+}
+
+.axis-calibration-check button { width: 100%; padding: 7px 4px; }
+.axis-calibration-check label { display: block; margin: 10px 0 5px; font-size: 10px; color: #a3b6ba; }
+.axis-calibration-check select { display: block; width: 100%; min-width: 0; padding: 7px 4px; font-size: 10px; }
+.axis-calibration-check small { display: block; margin-top: 7px; font-size: 9px; color: var(--mint, #96cfc2); }
+.axis-calibration-check select:disabled { opacity: .5; }
+
+.axis-calibration .axis-calibration-cancel {
+  width: 100%;
+  margin-top: 10px;
+  border-color: #98664e;
+  background: #2a1f1a;
+  color: #ffc09b;
+}
+
+.axis-calibration-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+.axis-calibration-verify { color: var(--mint, #96cfc2); border-color: #567a70; }
+.axis-calibration-body .axis-calibration-hint { color: #f0b18d; font-size: 10px; }
+.axis-calibration-body .axis-calibration-message { min-height: 30px; font-size: 10px; }
+.axis-calibration-body .axis-calibration-footnote { font-size: 9px; color: #91a5ab; }
+
+@media (min-width: 721px) and (max-width: 1100px) {
+  .axis-calibration-body { max-width: 600px; }
+}
+
+@media (max-width: 380px) {
+  .axis-calibration-checks { grid-template-columns: 1fr; }
+  .axis-calibration-heading { align-items: flex-start; }
+}

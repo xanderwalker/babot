@@ -1,15 +1,59 @@
+# Arduino compiled files
+*.cpp.o
+*.ino.cpp
+*.applet/
+*.hex
+*.elf
+
+# Build folder
+build/
+
+# Object files
+*.o
+*.obj
+
+# Precompiled files
+*.so
+*.dll
+*.dylib
+
+# Dependency files
+*.d
+
+# Executables
+*.exe
+*.out
+*.app
+
+# Logs
+*.log
+
+# EEPROM
+*.eep
+
+# Sketch backups
+*.bak
+*.tmp
+
+# DS_Store
+.DS_Store
+
+# VSCode settings (if you're using it)
+.vscode/
+
+# Local deployment snapshots and hosting state
+/.sites/
+.openai/
+
+# Local configuration and credentials
+.env
+.env.*
+!.env.example
+
+# Web dependencies, generated output, and Python caches
 node_modules/
 dist/
-*.tsbuildinfo
-.openai/*
-!.openai/hosting.json
-media/
-public/media/
-qa/
-
-data/*.mp4
-data/*media.json
-data/evidence/
+coverage/
 __pycache__/
 *.pyc
-scripts/blender/__pycache__/
+*.tsbuildinfo

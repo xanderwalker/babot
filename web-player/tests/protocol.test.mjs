@@ -1,12 +1,40 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { carPoseToFirmwarePose, commandedPoseDegrees, formatPoseCommand, formatArmCommand, isApprovedControllerOrigin } from "../src/protocol.mjs";
+import { DEFAULT_MOUNTING_CALIBRATION, validateMountingCalibration, carPoseToFirmwarePose, commandedPoseDegrees, formatPoseCommand, formatArmCommand, isApprovedControllerOrigin } from "../src/protocol.mjs";
 
 test("car calibration preserves the established 45 degree mapping", () => {
+  assert.equal(DEFAULT_MOUNTING_CALIBRATION.verified, false);
   const pitch = carPoseToFirmwarePose({ roll: 0, pitch: -1 });
   assert.ok(Math.abs(pitch.roll - Math.SQRT1_2) < 1e-12);
   assert.ok(Math.abs(pitch.pitch + Math.SQRT1_2) < 1e-12);
   assert.deepEqual(commandedPoseDegrees({ roll: 1, pitch: -1 }), { roll: 1, pitch: -0.75 });
+});
+
+test("configured mounting rotates and inverts isolated car axes without changing magnitude", () => {
+  const config = { angleDegrees: 90, invertRoll: true, invertPitch: false, verified: true };
+  const roll = carPoseToFirmwarePose({ roll: 3, pitch: 0 }, 20, config);
+  assert.ok(Math.abs(roll.roll) < 1e-12);
+  assert.equal(roll.pitch, -3);
+  const pitch = carPoseToFirmwarePose({ roll: 0, pitch: 4 }, 20, config);
+  assert.equal(pitch.roll, -4);
+  assert.ok(Math.abs(pitch.pitch) < 1e-12);
+  const combined = carPoseToFirmwarePose({ roll: 12, pitch: 16 }, 10, config);
+  assert.ok(Math.abs(Math.hypot(combined.roll, combined.pitch) - 10) < 1e-12);
+});
+
+test("mounting rejects corrupt saved settings and keeps an immutable validated snapshot", () => {
+  const base = { ...DEFAULT_MOUNTING_CALIBRATION };
+  const snapshot = validateMountingCalibration(base);
+  base.angleDegrees = -45;
+  assert.equal(snapshot.angleDegrees, 45);
+  assert.equal(Object.isFrozen(snapshot), true);
+  for (const angleDegrees of [NaN, Infinity, -Infinity, 181, -181, '45', null, undefined]) {
+    assert.throws(() => validateMountingCalibration({ ...base, angleDegrees }), /mounting/);
+  }
+  for (const value of [null, [], {}, { ...base, invertRoll: 1 }, { ...base, invertPitch: 'false' }, { ...base, verified: undefined }]) {
+    assert.throws(() => validateMountingCalibration(value), /mounting/);
+  }
+  for (const angleDegrees of [-180, 0, 180]) assert.equal(validateMountingCalibration({ ...base, angleDegrees }).angleDegrees, angleDegrees);
 });
 
 test("decimal wire poses stay inside the firmware circular envelope at every heading", () => {

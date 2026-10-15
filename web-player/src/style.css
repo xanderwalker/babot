@@ -15,3 +15,7 @@
 .concept-orbit-hint{position:absolute;bottom:14px;left:15px;font:7px 'IBM Plex Mono',monospace;letter-spacing:.05em;color:#65818b;pointer-events:none}.concept-chassis canvas{cursor:grab}.concept-chassis canvas:active{cursor:grabbing}
 
 .motion-mode{display:flex;align-items:center;font-size:10px;color:var(--mint)}
+
+.linked-gain{display:block}.linked-gain label{display:block}.linked-gain p{font:9px 'IBM Plex Mono',monospace;color:var(--muted);margin:9px 0}.linked-gain button{font-size:9px;padding:5px 8px;color:var(--mint)}.hardware-pose{font:9px 'IBM Plex Mono',monospace;color:var(--mint);line-height:1.6;margin:10px 0}.hardware-pose span{display:block;color:var(--muted);font:9px Barlow,sans-serif}.hardware-body>.axis-calibration{grid-column:1/-1}
+
+.lower-grid{align-items:start}

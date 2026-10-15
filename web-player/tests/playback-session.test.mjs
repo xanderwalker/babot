@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { PlaybackSession } from '../src/playback-session.mjs';
+import { AxisCalibrationSession } from '../src/axis-calibration.mjs';
 
 const deferred = () => { let resolve, reject; const promise = new Promise((yes, no) => { resolve = yes; reject = no; }); return { promise, resolve, reject }; };
 const flush = async () => { for (let i = 0; i < 12; i++) await Promise.resolve(); };
@@ -176,4 +177,74 @@ test('disposal stops active playback and late callbacks cannot re-enable intent'
   await h.finishStop(); h.runs[0].resolve(); await disposing; await flush();
   h.session.play(); h.session.updateStatus('ready', true); h.session.tick(); await flush();
   assert.equal(h.runs.length, 1); assert.equal(h.session.wantsMotion, false);
+});
+
+function sharedCalibrationController() {
+  let now = 0, getPose, running, stopping;
+  let playback, calibration;
+  const stops = [];
+  const status = (phase, offConfirmed = false) => {
+    playback.updateStatus(phase, true, offConfirmed);
+    calibration.updateStatus(phase);
+  };
+  const controller = {
+    start(sample) {
+      getPose = sample;
+      running = deferred();
+      status('arming'); status('following');
+      return running.promise;
+    },
+    stop(reason) {
+      if (stopping) return stopping.promise;
+      stopping = deferred();
+      stops.push(reason);
+      status('stopping');
+      queueMicrotask(() => {
+        status('stopped', true);
+        running.resolve();
+        stopping.resolve({ acknowledged: true, offConfirmed: true });
+      });
+      return stopping.promise;
+    },
+  };
+  playback = new PlaybackSession(controller, () => null);
+  calibration = new AxisCalibrationSession(controller, {
+    now: () => now, setTimeout: () => 1, clearTimeout: () => {},
+  });
+  status('ready');
+  return { playback, calibration, stops, sampleAt(time) { now = time; return getPose(); } };
+}
+
+test('late video waiting and seeking events cannot interrupt an isolated axis check', async () => {
+  for (const reason of ['Video buffering', 'Seeking video clock']) {
+    const h = sharedCalibrationController();
+    await h.playback.pause('Preparing isolated axis check');
+    const result = h.calibration.run('roll');
+    await flush();
+    let pose;
+    for (let t = 20; t <= 1100; t += 20) pose = h.sampleAt(t);
+    assert.ok(Math.hypot(pose.roll, pose.pitch) > 0.99, 'axis pulse reached its hold');
+    assert.equal(h.playback.wantsMotion, false);
+    await h.playback.suspend(reason);
+    assert.equal(h.stops.length, 0, 'video event must not stop the other motion owner');
+    assert.equal(h.calibration.isRunning, true);
+    for (let t = 1120; t <= 3000; t += 20) h.sampleAt(t);
+    const done = await result;
+    assert.equal(done.completed, true);
+    assert.equal(done.offConfirmed, true);
+    assert.equal(h.stops.length, 1, 'only the normal calibration completion sends STOP');
+  }
+});
+
+test('explicit pause still stops a shared calibration when replay has no motion intent', async () => {
+  const h = sharedCalibrationController();
+  const result = h.calibration.run('pitch');
+  await flush();
+  for (let t = 20; t <= 1100; t += 20) h.sampleAt(t);
+  assert.equal(h.playback.wantsMotion, false);
+  await h.playback.pause('Explicit Level + stop');
+  const done = await result;
+  assert.equal(h.stops.length, 1);
+  assert.equal(done.completed, false);
+  assert.equal(done.offConfirmed, true);
 });

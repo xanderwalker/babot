@@ -7,7 +7,7 @@ function deepFreeze(value) {
 }
 
 export const SINGAPORE_BABOT_MOTION_CONTRACT = deepFreeze({
-  version: 1,
+  version: 2,
   inputSchema: {
     fixture: "{ meta, carSamples, locationSamples }",
     carTuple: [
@@ -26,13 +26,14 @@ export const SINGAPORE_BABOT_MOTION_CONTRACT = deepFreeze({
   expectedSourceHz: 3.7,
   gravityMps2: GRAVITY_MPS2,
   maximumSourceGapMs: 900,
-  speedSmoothingWindowMs: 900,
-  headingSmoothingWindowMs: 900,
-  yawSmoothingWindowMs: 900,
+  speedSmoothingWindowMs: 500,
+  headingSmoothingWindowMs: 750,
+  yawSmoothingWindowMs: 650,
+  longitudinalCueResponseMs: 100,
   speedJumpLimitMps2: 75,
   locationJumpMedianFactor: 4,
-  longitudinalSoftScaleG: 1.1,
-  lateralSoftScaleG: 1.25,
+  longitudinalSoftScaleG: 2,
+  lateralSoftScaleG: 2.5,
   maximumEstimatedAbsG: 6,
   maximumModelConfidence: 0.68,
   lateralFadeStartMps: 4,
@@ -344,6 +345,7 @@ function normalizeLocationSamples(input) {
     outlierCount: cleaned.rejected,
     gapCount,
     jumpCount,
+    jumpThreshold,
   };
 }
 
@@ -459,6 +461,63 @@ function derivePathKinematics(points, headingWindowMs, yawWindowMs) {
       confidence: Math.min(point.confidence, yawFit.confidence),
     };
   });
+}
+
+// A short dropout can contain the turn itself. Blending the two already-derived
+// roll values would erase that turn, so reconstruct bounded positions first and
+// then differentiate the resulting path. The original samples remain untouched.
+// Monotone Hermite tangents cannot overshoot either coordinate's endpoint range.
+function reconstructShortGaps(points, keys, path = false, maximumPathRate = Infinity) {
+  const output = [];
+  const gaps = [];
+  for (let index = 0; index < points.length; index++) {
+    const a = points[index];
+    output.push(a);
+    const b = points[index + 1];
+    if (!b) continue;
+    const spanMs = b.tMs - a.tMs;
+    if (spanMs <= SINGAPORE_BABOT_MOTION_CONTRACT.maximumSourceGapMs ||
+        spanMs > SINGAPORE_RECORDED_PLAYBACK_CONTRACT.maximumInterpolationGapMs) continue;
+    const duration = spanMs / 1000;
+    // A dropout can coincide with a teleport/reset. Apply the same source jump
+    // limits across the missing interval before allowing any reconstructed cue.
+    const rate = path ? Math.hypot(b.x - a.x, b.y - a.y) / duration
+      : Math.abs(b.speedKph - a.speedKph) / 3.6 / duration;
+    const rateLimit = path ? maximumPathRate : SINGAPORE_BABOT_MOTION_CONTRACT.speedJumpLimitMps2;
+    if (!Number.isFinite(rate) || rate > rateLimit) continue;
+    const tangents = {};
+    if (path) {
+      for (const key of ["x", "y"]) {
+        const slope = (b[key] - a[key]) / duration;
+        if (Math.abs(slope) < 1e-9) { tangents[key] = [0, 0]; continue; }
+        const left = weightedLinearFit(points, index, key, 750).slope / slope;
+        const right = weightedLinearFit(points, index + 1, key, 750).slope / slope;
+        const alpha = clamp(left, 0, 3), beta = clamp(right, 0, 3);
+        const magnitude = Math.hypot(alpha, beta);
+        const scale = magnitude > 3 ? 3 / magnitude : 1;
+        tangents[key] = [alpha * slope * scale, beta * slope * scale];
+      }
+    }
+    gaps.push({ startMs: a.tMs, endMs: b.tMs });
+    const divisions = Math.ceil(spanMs / 200);
+    for (let step = 1; step < divisions; step++) {
+      const u = step / divisions;
+      const point = { ...a, tMs: a.tMs + spanMs * u, reconstructed: true };
+      for (const key of keys) {
+        if (path && tangents[key]) {
+          const [left, right] = tangents[key];
+          point[key] = (2 * u ** 3 - 3 * u ** 2 + 1) * a[key] +
+            (u ** 3 - 2 * u ** 2 + u) * duration * left +
+            (-2 * u ** 3 + 3 * u ** 2) * b[key] +
+            (u ** 3 - u ** 2) * duration * right;
+        } else point[key] = lerp(a[key], b[key], u);
+      }
+      // Discrete channels are never used to manufacture a new pedal/gear event.
+      if (!path) for (const key of ["brakeOn", "gear", "drs"]) point[key] = a[key];
+      output.push(point);
+    }
+  }
+  return { points: output, gaps };
 }
 
 function bracketAt(points, requestedMs) {
@@ -605,6 +664,10 @@ export function buildSingaporeBabotMotionSeries(fixture, options = {}) {
   const samples = [];
   const longitudinalConfidences = [];
   const lateralConfidences = [];
+  const responseMs = Math.max(0, finite(options.longitudinalCueResponseMs,
+    SINGAPORE_BABOT_MOTION_CONTRACT.longitudinalCueResponseMs));
+  const responseAmount = responseMs > 0 ? -Math.expm1(-intervalMs / responseMs) : 1;
+  let previousLongG = null;
   for (let sourceTimeMs = gridStartMs; sourceTimeMs <= gridEndMs; sourceTimeMs += intervalMs) {
     const carBracket = bracketAt(carKinematics, sourceTimeMs);
     const pathBracket = bracketAt(pathKinematics, sourceTimeMs);
@@ -628,7 +691,12 @@ export function buildSingaporeBabotMotionSeries(fixture, options = {}) {
       ? speedMps * interpolateContinuous(pathBracket, "yawRateRadS") / GRAVITY_MPS2 * speedFade
       : 0;
     const maximumG = SINGAPORE_BABOT_MOTION_CONTRACT.maximumEstimatedAbsG;
-    const longG = clamp(rawLongG, -maximumG, maximumG);
+    const boundedLongG = clamp(rawLongG, -maximumG, maximumG);
+    // A short causal response controls jerk without looking farther into future
+    // braking data. Reset across unavailable source segments, never stale-hold.
+    const longG = carBracket && previousLongG !== null
+      ? lerp(previousLongG, boundedLongG, responseAmount) : boundedLongG;
+    previousLongG = carBracket ? longG : null;
     const latG = clamp(rawLatG, -maximumG, maximumG);
     const normalized = normalizeSingaporeDerivedMotion(longG, latG, options);
     const validLongitudinal = Boolean(carBracket) && longitudinalConfidence > 0;
@@ -678,19 +746,19 @@ export function buildSingaporeBabotMotionSeries(fixture, options = {}) {
     "Longitudinal acceleration is differentiated from smoothed OpenF1 speed",
     "Lateral acceleration uses approximate OpenF1 path heading and does not resolve racing-line placement",
   ];
-  if (car.gapCount + location.gapCount > 0) reasons.push("Source gaps are neutralized rather than bridged");
+  if (car.gapCount + location.gapCount > 0) reasons.push("Strict source samples remain unavailable across gaps; playback may reconstruct bounded short gaps separately with lower confidence");
   if (car.jumpCount + location.jumpCount + car.outlierCount + location.outlierCount > 0) {
     reasons.push("Detected source jumps or isolated outliers were rejected");
   }
 
-  return deepFreeze({
+  const result = {
     provenance: {
       source: "OpenF1",
       measuredG: false,
       label: SINGAPORE_BABOT_MOTION_CONTRACT.provenanceLabel,
       warning: SINGAPORE_BABOT_MOTION_CONTRACT.honestyLabel,
       method: {
-        longitudinal: "longG = d(smoothed speed)/dt / 9.80665",
+        longitudinal: "longG = d(smoothed speed)/dt / 9.80665, with a short causal cue response",
         lateral: "latG = smoothed speed * d(unwrapped smoothed path heading)/dt / 9.80665",
         normalization: "normalized pitch/roll use bounded tanh soft saturation",
       },
@@ -744,7 +812,45 @@ export function buildSingaporeBabotMotionSeries(fixture, options = {}) {
       outputSampleCount: samples.length,
     },
     samples,
-  });
+  };
+  if (options.reconstructPlayback !== false) {
+    const reconstructedCar = reconstructShortGaps(car.points, ["speedKph", "rpm", "throttlePct"]);
+    const reconstructedPath = reconstructShortGaps(location.points, ["x", "y", "z"], true, location.jumpThreshold);
+    const carGaps = reconstructedCar.gaps;
+    const pathGaps = reconstructedPath.gaps;
+    let playback = result;
+    if (carGaps.length || pathGaps.length) {
+      playback = buildSingaporeBabotMotionSeries({
+        ...fixture,
+        carSamples: reconstructedCar.points.map(p => [p.tMs, p.speedKph, p.rpm, p.throttlePct, p.brakeOn, p.gear, p.drs]),
+        locationSamples: reconstructedPath.points.map(p => [p.tMs, p.x, p.y, p.z]),
+      }, { ...options, reconstructPlayback: false });
+      result.diagnostics.reconstructedCarGaps = carGaps;
+      result.diagnostics.reconstructedPathGaps = pathGaps;
+      result.provenance.method.playbackReconstruction = "Inside gaps up to 1200 ms: linear speed and bounded monotone-Hermite path, before differentiation; confidence capped at 0.35";
+    }
+    const touches = (time, gaps, support) => gaps.some(gap => time > gap.startMs - support && time < gap.endMs + support);
+    const inside = (time, gaps) => gaps.some(gap => time >= gap.startMs && time <= gap.endMs);
+    result.playbackSamples = playback.samples.map(sample => {
+      const sourceValid = singaporeMotionAt(result, sample.timeMs / 1000).valid;
+      const reconstructed = touches(sample.timeMs, carGaps, speedWindowMs) ||
+        touches(sample.timeMs, pathGaps, headingWindowMs + yawWindowMs);
+      const cap = reconstructed ? SINGAPORE_RECORDED_PLAYBACK_CONTRACT.maximumReconstructedConfidence :
+        SINGAPORE_BABOT_MOTION_CONTRACT.maximumModelConfidence;
+      // Recomputing source statistics must never turn an unrelated jump or long
+      // dropout into an accepted pose merely because another gap was rebuilt.
+      const supported = (bracketAt(carKinematics, sample.timeMs) || inside(sample.timeMs, carGaps)) &&
+        (bracketAt(pathKinematics, sample.timeMs) || inside(sample.timeMs, pathGaps));
+      return {
+        ...sample, valid: sample.valid && Boolean(supported), sourceValid, reconstructed,
+        cueSource: reconstructed ? "reconstructed-path-and-speed" : "derived-source",
+        confidence: Math.min(sample.confidence, cap),
+        longitudinalConfidence: Math.min(sample.longitudinalConfidence, cap),
+        lateralConfidence: Math.min(sample.lateralConfidence, cap),
+      };
+    });
+  }
+  return deepFreeze(result);
 }
 
 const CONTINUOUS_SAMPLE_KEYS = Object.freeze([
@@ -849,6 +955,7 @@ export const SINGAPORE_RECORDED_PLAYBACK_CONTRACT = Object.freeze({
   maximumInterpolationGapMs: 1200,
   maximumEndpointHoldMs: 350,
   maximumNormalizedAxis: 1,
+  maximumReconstructedConfidence: 0.35,
 });
 
 const DISCRETE_SAMPLE_KEYS = Object.freeze(["brakeOn", "gear", "drs"]);
@@ -872,7 +979,8 @@ export function createSingaporePlaybackMotionSampler(series, options = {}) {
     throw new TypeError("Recorded playback requires a finite positive lap duration");
   }
   const durationMs = durationSeconds * 1000;
-  const input = Array.isArray(series) ? series : series?.samples;
+  const input = Array.isArray(series) ? series : series?.playbackSamples ?? series?.samples;
+  const hasReconstructedSeries = !Array.isArray(series) && Array.isArray(series?.playbackSamples);
   const samples = (Array.isArray(input) ? input : [])
     .filter((sample) => finitePlaybackSample(sample) && sample.timeMs >= 0 && sample.timeMs <= durationMs)
     .map((sample) => Object.freeze({ ...sample }))
@@ -914,6 +1022,12 @@ export function createSingaporePlaybackMotionSampler(series, options = {}) {
       });
     }
 
+    // A prepared model has already decided which source gaps can be rebuilt.
+    // Do not bridge its remaining invalid regions (for example source jumps).
+    if (hasReconstructedSeries && !finitePlaybackSample(singaporeMotionAt(input, elapsedSeconds))) {
+      return unavailable("unsupported-source-gap");
+    }
+
     let lowIndex = 0;
     let highIndex = samples.length - 1;
     while (lowIndex + 1 < highIndex) {
@@ -926,9 +1040,9 @@ export function createSingaporePlaybackMotionSampler(series, options = {}) {
     const exact = requestedMs === low.timeMs ? low : requestedMs === high.timeMs ? high : null;
     if (exact) return Object.freeze({
       ...exact,
-      sourceValid: true,
-      playbackMode: "source",
-      playbackReason: "valid-recorded-pose",
+      sourceValid: finitePlaybackSample(singaporeMotionAt(series, elapsedSeconds)),
+      playbackMode: exact.reconstructed ? "reconstructed-gap" : "source",
+      playbackReason: exact.reconstructed ? "bounded-source-reconstruction" : "valid-recorded-pose",
     });
     const spanMs = high.timeMs - low.timeMs;
     if (spanMs > maximumInterpolationGapMs) return unavailable("interpolation-gap-limit");
@@ -939,8 +1053,10 @@ export function createSingaporePlaybackMotionSampler(series, options = {}) {
       timeMs: requestedMs,
       valid: true,
       sourceValid,
-      playbackMode: sourceValid ? "source" : "interpolated-gap",
-      playbackReason: sourceValid ? "valid-recorded-pose" : "short-recorded-gap",
+      reconstructed: Boolean(low.reconstructed || high.reconstructed),
+      cueSource: low.reconstructed || high.reconstructed ? "reconstructed-path-and-speed" : "derived-source",
+      playbackMode: low.reconstructed || high.reconstructed ? "reconstructed-gap" : sourceValid ? "source" : "interpolated-gap",
+      playbackReason: low.reconstructed || high.reconstructed ? "bounded-source-reconstruction" : sourceValid ? "valid-recorded-pose" : "short-recorded-gap",
       brakeOn: nearest.brakeOn,
       gear: nearest.gear,
       drs: nearest.drs,
@@ -948,6 +1064,13 @@ export function createSingaporePlaybackMotionSampler(series, options = {}) {
     // A convex blend cannot overshoot either valid normalized endpoint. Do not
     // extrapolate derivatives or bridge via the strict model's neutral placeholders.
     for (const key of CONTINUOUS_SAMPLE_KEYS) interpolated[key] = lerp(low[key], high[key], amount);
+    // An off-grid sample touching reconstructed support inherits its lower
+    // confidence even when the other endpoint is an ordinary derived cue.
+    if (interpolated.reconstructed) {
+      for (const key of ["confidence", "longitudinalConfidence", "lateralConfidence"]) {
+        interpolated[key] = Math.min(interpolated[key], SINGAPORE_RECORDED_PLAYBACK_CONTRACT.maximumReconstructedConfidence);
+      }
+    }
     return Object.freeze(interpolated);
   };
 }

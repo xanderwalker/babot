@@ -46,14 +46,14 @@ export function ConceptChassis({conceptId,roll,pitch,valid,distanceMeters}:{conc
       const wheels:THREE.Object3D[]=[...(car.userData.wheels??[])];car.traverse(obj=>{if(obj.userData.isWheel&&!wheels.includes(obj))wheels.push(obj);});
       let previousWidth=0,previousHeight=0;
       const render=()=>{if(!rig||!mount.current)return;const {width,height}=mount.current.getBoundingClientRect();if(!width||!height)return;const resized=width!==previousWidth||height!==previousHeight;const p=current.current;
-        if(articulated){car.userData.updatePose({rollDeg:p.valid?-p.roll*8:0,pitchDeg:p.valid?p.pitch*4:0,wheelAngle:-p.distanceMeters/(car.userData.wheelRadius??.48)});}else{car.rotation.z=THREE.MathUtils.degToRad(p.valid?-p.roll*8:0);car.rotation.x=THREE.MathUtils.degToRad(p.valid?-p.pitch*4:0);wheels.forEach(wheel=>{wheel.rotation.x=-p.distanceMeters/(car.userData.wheelRadius??.48);});}car.position.y=baseY;
+        if(articulated){car.userData.updatePose({rollDeg:p.valid?-p.roll:0,pitchDeg:p.valid?p.pitch:0,wheelAngle:-p.distanceMeters/(car.userData.wheelRadius??.48)});}else{car.rotation.z=THREE.MathUtils.degToRad(p.valid?-p.roll:0);car.rotation.x=THREE.MathUtils.degToRad(p.valid?-p.pitch:0);wheels.forEach(wheel=>{wheel.rotation.x=-p.distanceMeters/(car.userData.wheelRadius??.48);});}car.position.y=baseY;
         if(resized){rig.renderer.setSize(width,height,false);rig.camera.aspect=width/height;rig.camera.updateProjectionMatrix();frameCar(rig.camera,car);previousWidth=width;previousHeight=height;}
-        mount.current.dataset.visualRoll=String(p.valid?-p.roll*8:0);mount.current.dataset.visualPitch=String(p.valid?p.pitch*4:0);rig.renderer.render(rig.scene,rig.camera);
+        mount.current.dataset.visualRoll=String(p.valid?-p.roll:0);mount.current.dataset.visualPitch=String(p.valid?p.pitch:0);rig.renderer.render(rig.scene,rig.camera);
       };draw.current=render;controls=new OrbitControls(rig.camera,canvas.current);controls.enableDamping=false;controls.enablePan=false;controls.minDistance=4;controls.maxDistance=18;controls.minPolarAngle=.25;controls.maxPolarAngle=Math.PI*.48;controls.target.set(0,.4,0);controls.addEventListener('change',render);controls.update();observer=new ResizeObserver(render);observer.observe(mount.current);render();setError(false);
     }catch{setError(true);}return()=>{draw.current=()=>{};observer?.disconnect();controls?.dispose();rig?.destroy();};
   },[conceptId]);
   useEffect(()=>draw.current(),[roll,pitch,valid,distanceMeters]);
-  return <div ref={mount} className="concept-chassis"><canvas ref={canvas} role="img" aria-label={`${CHASSIS_CONCEPTS.find(c=>c.id===conceptId)?.name} conceptual F1 motion study. Visual roll eight times and pitch four times.`}/><span className="concept-orbit-hint">DRAG TO INSPECT</span><span className="concept-amplification">BODY ROLL ×8 · PITCH ×4</span>{error?<p className="concept-error">3D preview unavailable in this browser.</p>:null}</div>;
+  return <div ref={mount} className="concept-chassis"><canvas ref={canvas} role="img" aria-label={`${CHASSIS_CONCEPTS.find(c=>c.id===conceptId)?.name} conceptual F1 motion study. Body angles match the chassis readout.`}/><span className="concept-orbit-hint">DRAG TO INSPECT</span><span className="concept-amplification">DERIVED BODY POSE</span>{error?<p className="concept-error">3D preview unavailable in this browser.</p>:null}</div>;
 }
 
 export function ChassisGallery({selected,onSelect,onClose}:{selected:string;onSelect:(id:string)=>void;onClose:()=>void}) {
@@ -94,7 +94,7 @@ export function ChassisGallery({selected,onSelect,onClose}:{selected:string;onSe
             ctx.fillStyle='#9bb0b5';ctx.font='14px sans-serif';let line='',lineY=y+252;
             for(const word of concept.description.split(' ')){if(ctx.measureText(line+word).width>305){ctx.fillText(line,x+14,lineY);lineY+=20;line='';}line+=word+' ';}ctx.fillText(line,x+14,lineY);
           });
-          ctx.fillStyle='#6c8991';ctx.font='13px monospace';ctx.fillText('Conceptual suspension / Visual roll ×8 / Physical BaBot limits unchanged',30,830);
+          ctx.fillStyle='#6c8991';ctx.font='13px monospace';ctx.fillText('Conceptual suspension / Display angles / Separate physical calibration',30,830);
           if(!cancelled)setComparison(sheet.toDataURL('image/png'));
         });
       } catch { /* Interactive player remains usable if thumbnail rendering is unavailable. */ }

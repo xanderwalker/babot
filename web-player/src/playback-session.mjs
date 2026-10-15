@@ -31,6 +31,10 @@ export class PlaybackSession {
   }
 
   suspend(reason = 'Waiting for fresh video frames') {
+    // Video events can arrive after replay was paused for an isolated axis
+    // check. Shared controller status does not grant replay ownership of it.
+    // Explicit pause/stop still reaches the controller regardless of intent.
+    if (!this.wantsMotion) return this.stopPromise ?? Promise.resolve({ acknowledged: false, offConfirmed: false });
     return this.stopOnce(reason);
   }
 

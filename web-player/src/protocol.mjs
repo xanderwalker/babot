@@ -1,4 +1,5 @@
 /** BaBot Motion v1. Keep this contract aligned with ../../PROTOCOL.md. */
+/** @typedef {{angleDegrees:number, invertRoll:boolean, invertPitch:boolean, verified:boolean}} MountingCalibration */
 export const BABOT_PROTOCOL = Object.freeze({
   baudRate: 115200,
   commandIntervalMs: 20,
@@ -7,6 +8,31 @@ export const BABOT_PROTOCOL = Object.freeze({
   responseTimeoutMs: 140,
   stopReturnTimeoutMs: 1000,
 });
+
+// Retain the established transform until an observed axis check replaces it.
+export const DEFAULT_MOUNTING_CALIBRATION = Object.freeze({
+  angleDegrees: 45,
+  invertRoll: false,
+  invertPitch: false,
+  verified: false,
+});
+
+/** @param {MountingCalibration} [config] */
+export function validateMountingCalibration(config = DEFAULT_MOUNTING_CALIBRATION) {
+  if (!config || typeof config !== "object" || Array.isArray(config)
+    || typeof config.angleDegrees !== "number" || !Number.isFinite(config.angleDegrees)
+    || config.angleDegrees < -180 || config.angleDegrees > 180
+    || typeof config.invertRoll !== "boolean" || typeof config.invertPitch !== "boolean"
+    || typeof config.verified !== "boolean") {
+    throw new Error("Invalid BaBot mounting calibration");
+  }
+  return Object.freeze({
+    angleDegrees: config.angleDegrees,
+    invertRoll: config.invertRoll,
+    invertPitch: config.invertPitch,
+    verified: config.verified,
+  });
+}
 
 export function isApprovedControllerOrigin({ isSecureContext, isTopLevel } = {}) {
   return isSecureContext === true && isTopLevel === true;
@@ -30,11 +56,20 @@ export function commandedPoseDegrees(pose, amplitudes = {}, { invertRoll = false
   return limitPoseMagnitude({ roll, pitch });
 }
 
-/** Existing car mounting calibration: car axes are 45 degrees from plate axes. */
-export function carPoseToFirmwarePose(pose, maximumDegrees = BABOT_PROTOCOL.maximumDegrees) {
+/**
+ * Invert car axes first, then rotate into firmware plate axes.
+ * @param {{roll:number,pitch:number}} pose
+ * @param {number} [maximumDegrees]
+ * @param {MountingCalibration} [mounting]
+ */
+export function carPoseToFirmwarePose(pose, maximumDegrees = BABOT_PROTOCOL.maximumDegrees, mounting = DEFAULT_MOUNTING_CALIBRATION) {
+  const config = validateMountingCalibration(mounting);
+  const angle = config.angleDegrees * Math.PI / 180;
+  const roll = Number(pose.roll) * (config.invertRoll ? -1 : 1);
+  const pitch = Number(pose.pitch) * (config.invertPitch ? -1 : 1);
   return limitPoseMagnitude({
-    roll: (Number(pose.roll) - Number(pose.pitch)) * Math.SQRT1_2,
-    pitch: (Number(pose.roll) + Number(pose.pitch)) * Math.SQRT1_2,
+    roll: roll * Math.cos(angle) - pitch * Math.sin(angle),
+    pitch: roll * Math.sin(angle) + pitch * Math.cos(angle),
   }, maximumDegrees);
 }
 
